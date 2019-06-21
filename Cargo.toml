@@ -1,0 +1,21 @@
+[package]
+name = "reee"
+version = "0.1.0"
+authors = ["/alex/"]
+edition = "2018"
+
+[dependencies]
+bus = "2.2.1"
+tokio = "0.1.21"
+crossbeam-channel = "0.3.8"
+uuid = { version = "0.7.4", features = ["v4" ] }
+
+[lib]
+name = "reee"
+path = "src/lib.rs"
+
+[[bin]]
+name = "reee"
+path = "src/main.rs"
+
+
