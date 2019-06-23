@@ -1,71 +1,120 @@
 //! Entity
 
-use std::cell::RefCell;
+use crate::common::trigger::TriggerHandle;
+use crate::common::watcher::Watcher;
+use crate::errors::Error;
+
 use std::collections::{
     HashMap,
     HashSet,
 };
-use std::rc::Rc;
+use std::sync::{
+    Arc,
+    Mutex,
+};
 
 use bus::BusReader as Receiver;
-
 use tokio::{
     io,
     prelude::*,
 };
 use uuid::Uuid;
 
-use crate::errors::Error;
-
 /// An entity in the EEE model.
 pub struct Entity {
     /// A unique identifier of this entity.
-    pub uuid: String,
-    joined_environments: Rc<RefCell<HashMap<String, Receiver<String>>>>,
-    affected_environments: Rc<RefCell<HashSet<String>>>,
+    pub uuid: Arc<String>,
+    /// The environments this entity has joined.
+    joined_environments: Arc<Mutex<HashMap<String, EnvironmentListener>>>,
+    /// The environments this entity affects.
+    affected_environments: Arc<Mutex<HashSet<String>>>,
+    /// a handle to signal supervisor shutdown
+    shutdown_listener: Arc<Mutex<TriggerHandle>>,
+    /// a waker to wake up this entitie's task/future
+    waker: Watcher,
+}
+
+///
+struct EnvironmentListener {
+    /// effect receiving channel half
+    pub in_chan: Receiver<String>,
+    /// environment sig term listener
+    pub term_sig: TriggerHandle,
+    /// a waker to wake the environment's task/future
+    pub env_waker: Watcher,
 }
 
 impl Entity {
+    /// Creates a new entity.
+    pub fn new(shutdown_listener: TriggerHandle) -> Self {
+        let waker = Watcher::new();
+        Self {
+            uuid: shared!(Uuid::new_v4().to_string()),
+            joined_environments: shared_mut!(HashMap::new()),
+            affected_environments: shared_mut!(HashSet::new()),
+            shutdown_listener: shared_mut!(shutdown_listener),
+            waker,
+        }
+    }
+
     /// Registers an environment as joined by this entity.
-    pub fn join_environment(&mut self, name: &str, rx: Receiver<String>) -> Result<(), Error> {
-        if self.joined_environments.borrow().contains_key(name) {
+    pub fn join_environment(
+        &mut self,
+        name: &str,
+        in_chan: Receiver<String>,
+        term_sig: TriggerHandle,
+        env_waker: Watcher,
+    ) -> Result<(), Error> {
+        //
+        let mut joined = unlock!(self.joined_environments);
+
+        if joined.contains_key(name) {
             return Err(Error::App("This entity already joined that environment"));
         }
 
-        // Store the name and the receiver handle of that environment
-        self.joined_environments.borrow_mut().insert(name.into(), rx);
+        // Store the name and an environment listener
+        joined.insert(name.into(), EnvironmentListener { in_chan, term_sig, env_waker });
+
         Ok(())
     }
 
     /// Registers an environment as affected by this entity.
     pub fn affect_environment(&mut self, name: &str) -> Result<(), Error> {
-        if self.affected_environments.borrow().contains(name) {
+        let mut affected = unlock!(self.affected_environments);
+
+        if affected.contains(name) {
             return Err(Error::App("This entity already affects that environment"));
         }
 
         // Store the name and the receiver handle of that environment
-        self.affected_environments.borrow_mut().insert(name.into());
+        affected.insert(name.into());
+
         Ok(())
+    }
+
+    /// Returns a waker that allows to wake this environments task/future.
+    pub fn get_waker(&self) -> Watcher {
+        self.waker.clone()
     }
 
     /// Returns true, if this entity has joined the specified environment, otherwise false.
     pub fn has_joined(&self, name: &str) -> bool {
-        self.joined_environments.borrow().contains_key(name)
+        unlock!(self.joined_environments).contains_key(name)
     }
 
     /// Returns true, if this entity has joined the specified environment, otherwise false.
     pub fn is_affecting(&self, name: &str) -> bool {
-        self.affected_environments.borrow().contains(name)
+        unlock!(self.affected_environments).contains(name)
     }
-}
 
-impl Default for Entity {
-    fn default() -> Self {
-        Self {
-            uuid: Uuid::new_v4().to_string(),
-            joined_environments: Rc::new(RefCell::new(HashMap::new())),
-            affected_environments: Rc::new(RefCell::new(HashSet::new())),
-        }
+    /// Returns the number of joined environments.
+    pub fn num_joined(&self) -> usize {
+        unlock!(self.joined_environments).len()
+    }
+
+    /// Returns the number of affected environments.
+    pub fn num_affected(&self) -> usize {
+        unlock!(self.affected_environments).len()
     }
 }
 
@@ -74,36 +123,102 @@ impl Future for Entity {
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<(), Self::Error> {
-        loop {
-            let mut i = 0;
-            {
-                let mut environments = self.joined_environments.borrow_mut();
-                for (env, receiver) in environments.iter_mut() {
-                    //let data = receiver.recv().expect("error");
-                    match receiver.try_recv() {
-                        Err(_) => i += 1,
-                        Ok(data) => {
-                            println!(
-                                "Entity '{}' received '{}' from environment '{}'",
-                                self.uuid, data, env
-                            );
+        self.waker.task.register();
+
+        // this scope will modify 'joined_environments'
+        {
+            let mut joined = unlock!(self.joined_environments);
+            let mut to_drop = vec![];
+
+            'outer: loop {
+                // number of dry in-channels
+                let mut num_dry = 0;
+
+                // Check each joined environment if there is a new effect
+                for (env, EnvironmentListener { in_chan, term_sig: _, env_waker: _ }) in
+                    joined.iter_mut()
+                {
+                    // Try to receive as many effects as possible from that environment
+                    // TODO: maybe make this a for-loop with an upper limit to give other
+                    // futures time to progress as well
+                    'inner: loop {
+                        match in_chan.try_recv() {
+                            Ok(effect) => println!(
+                                "Ent. {} received effect '{}' from environment '{}'",
+                                &self.uuid[0..5],
+                                effect,
+                                env
+                            ),
+                            _ => {
+                                num_dry += 1;
+                                break 'inner;
+                            }
                         }
                     }
                 }
+
+                // If all channels are dry this future can finally go to sleep until awakened
+                // again
+                if num_dry >= joined.len() {
+                    break 'outer;
+                }
             }
-            if i == self.joined_environments.borrow().len() {
-                return Ok(Async::NotReady);
+
+            // Check if any environment sent a sig-term
+            for (env, EnvironmentListener { in_chan: _, term_sig, env_waker: _ }) in
+                joined.iter_mut()
+            {
+                match term_sig.0.poll() {
+                    Ok(Async::Ready(Some(is_term))) => {
+                        if is_term {
+                            println!(
+                                "Ent. {} received sig-term from environment '{}'",
+                                &self.uuid[0..5],
+                                env
+                            );
+
+                            // Remember to unsubscribe from that environment
+                            to_drop.push(env.clone());
+                        }
+                    }
+                    _ => (),
+                }
             }
+
+            // Remove all environments we received a term signal from
+            for env in to_drop {
+                joined.remove(&env);
+                println!("Ent. {} unsubscribed from environment '{}'", &self.uuid[0..5], env);
+            }
+        } // we're finished with mutating 'joined_environments'
+
+        // Check if the supervisor is about to shutdown
+        match unlock!(self.shutdown_listener).0.poll() {
+            // sig-term received
+            // NOTE: the 'watch' channel always yields Some!!
+            Ok(Async::Ready(Some(is_term))) => {
+                if is_term {
+                    println!("Ent. {} received sig-term", &self.uuid[0..5]);
+                    // End this future
+                    return Ok(Async::Ready(()));
+                }
+            }
+            _ => (),
         }
+
+        // Entity goes to sleep
+        Ok(Async::NotReady)
     }
 }
 
 impl Clone for Entity {
     fn clone(&self) -> Self {
         Self {
-            uuid: self.uuid.clone(),
-            joined_environments: Rc::clone(&self.joined_environments),
-            affected_environments: Rc::clone(&self.affected_environments),
+            uuid: Arc::clone(&self.uuid),
+            joined_environments: Arc::clone(&self.joined_environments),
+            affected_environments: Arc::clone(&self.affected_environments),
+            shutdown_listener: Arc::clone(&self.shutdown_listener),
+            waker: self.waker.clone(),
         }
     }
 }

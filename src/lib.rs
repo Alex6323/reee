@@ -2,6 +2,11 @@
 
 #![deny(missing_docs)]
 
+#[macro_use]
+mod common;
+
+mod constants;
+
 pub mod eee;
 pub mod errors;
 pub mod supervisor;

@@ -1,6 +1,5 @@
 //! Errors
 
-use crossbeam_channel::SendError;
 use std::io;
 
 /// An error.
@@ -9,7 +8,9 @@ pub enum Error {
     /// A general application error.
     App(&'static str),
     /// A channel send erro.
-    Send(SendError<String>),
+    EffectSend(crossbeam_channel::SendError<String>),
+    /// A channel send erro.
+    TriggerSend(tokio::sync::watch::error::SendError<bool>),
     /// An I/O error.
     Io(io::Error),
 }
@@ -20,9 +21,15 @@ impl From<&'static str> for Error {
     }
 }
 
-impl From<SendError<String>> for Error {
-    fn from(e: SendError<String>) -> Self {
-        Error::Send(e)
+impl From<crossbeam_channel::SendError<String>> for Error {
+    fn from(e: crossbeam_channel::SendError<String>) -> Self {
+        Error::EffectSend(e)
+    }
+}
+
+impl From<tokio::sync::watch::error::SendError<bool>> for Error {
+    fn from(e: tokio::sync::watch::error::SendError<bool>) -> Self {
+        Error::TriggerSend(e)
     }
 }
 
