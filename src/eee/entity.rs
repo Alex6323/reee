@@ -227,9 +227,4 @@ impl Clone for Entity {
 mod tests {
     use super::*;
 
-    // Create a new entity
-    #[test]
-    fn new_entity() {
-        let _ent = Entity::default();
-    }
 }

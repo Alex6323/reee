@@ -21,7 +21,7 @@ use tokio::runtime::Runtime;
 /// ```
 /// use reee::supervisor::Supervisor;
 ///
-/// let mut sv = Supervisor::default();
+/// let mut sv = Supervisor::new();
 ///
 /// let _x = sv.create_environment("X").expect("error creating environment");
 /// let _y = sv.create_environment("Y").expect("error creating environment");
@@ -29,8 +29,8 @@ use tokio::runtime::Runtime;
 /// let _a = sv.create_entity(vec!["X"]).expect("error creating entity");
 /// let _b = sv.create_entity(vec!["X", "Y"]).expect("error creating entity");
 ///
-/// sv.submit_message("hello", "X").expect("error sending message");
-/// sv.submit_message("world", "Y").expect("error sending message");
+/// sv.submit_effect("hello", "X").expect("error sending message");
+/// sv.submit_effect("world", "Y").expect("error sending message");
 /// ```
 pub struct Supervisor {
     runtime: Runtime,
@@ -159,7 +159,7 @@ impl Supervisor {
         }
     }
 
-    /// Shuts down the supervisor.
+    /// Shuts down the supervisor programmatically without user intervention.
     pub fn shutdown(mut self) -> Result<(), Error> {
         // Send the signal to make all infinite futures return Ok(Async::Ready(None))
         self.graceful_shutdown.send_term_sig()?;
@@ -180,17 +180,6 @@ impl Supervisor {
         self.shutdown()
     }
 
-    /// This method can be used in unit/integration tests to shutdown the supervisor
-    /// programmatically.
-    #[cfg(test)]
-    pub fn shutdown(mut self) {
-        // Send signal to stop infinite futures
-        drop(self.grace_full_shutdown);
-
-        // Wait until all futures return Ok(Async::Ready(None)), then shutdown the runtime
-        self.runtime.shutdown_on_idle().wait().unwrap();
-    }
-
     /// Returns the number of supervised environments.
     pub fn num_environments(&self) -> usize {
         self.environments.len()
@@ -203,12 +192,12 @@ mod tests {
 
     #[test]
     fn new_supervisor() {
-        let _sv = Supervisor::default();
+        let _sv = Supervisor::new();
     }
 
     #[test]
     fn two_different_environments() {
-        let mut sv = Supervisor::default();
+        let mut sv = Supervisor::new();
         sv.create_environment("a").unwrap();
         sv.create_environment("b").unwrap();
     }
@@ -217,7 +206,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn create_environment() {
-        let mut sv = Supervisor::default();
+        let mut sv = Supervisor::new();
         sv.create_environment("a").unwrap();
         sv.create_environment("a").unwrap();
     }

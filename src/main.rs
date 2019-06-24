@@ -26,7 +26,7 @@ fn test1() {
 
     thread::sleep(Duration::from_millis(1000));
 
-    sv.wait_for_kill_signal();
+    sv.wait_for_kill_signal().expect("error waiting for ctrl-c");
 }
 
 fn test2() {
@@ -53,5 +53,5 @@ fn test2() {
 
     thread::sleep(Duration::from_millis(500));
 
-    sv.wait_for_kill_signal();
+    sv.wait_for_kill_signal().expect("error waiting for ctrl-c");
 }
