@@ -83,9 +83,7 @@ impl Entity {
         let mut joined = unlock!(self.joined_environments);
 
         if joined.contains_key(name) {
-            return Err(Error::App(
-                "This entity already joined that environment",
-            ));
+            return Err(Error::App("This entity already joined that environment"));
         }
 
         // Store the name and an environment listener
@@ -103,9 +101,7 @@ impl Entity {
         let mut affected = unlock!(self.affected_environments);
 
         if affected.contains_key(env_name) {
-            return Err(Error::App(
-                "This entity already affects that environment",
-            ));
+            return Err(Error::App("This entity already affects that environment"));
         }
 
         // Store the name and the receiver handle of that environment
@@ -188,8 +184,7 @@ impl Future for Entity {
                 let mut num_dry = 0;
 
                 // Check each joined environment if there is a new effect
-                for (env, JoinedEnvironment { in_chan, term_sig: _ }) in
-                    joined.iter_mut()
+                for (env, JoinedEnvironment { in_chan, term_sig: _ }) in joined.iter_mut()
                 {
                     // Try to receive as many effects as possible from that
                     // environment TODO: maybe make this a
@@ -223,13 +218,10 @@ impl Future for Entity {
                 }
             }
 
-            self.num_received_effects
-                .store(num_effects + num, Ordering::Release);
+            self.num_received_effects.store(num_effects + num, Ordering::Release);
 
             // Check if any environment sent a sig-term
-            for (env, JoinedEnvironment { in_chan: _, term_sig }) in
-                joined.iter_mut()
-            {
+            for (env, JoinedEnvironment { in_chan: _, term_sig }) in joined.iter_mut() {
                 match term_sig.0.poll() {
                     Ok(Async::Ready(Some(is_term))) => {
                         if is_term {

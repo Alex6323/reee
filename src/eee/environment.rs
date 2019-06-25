@@ -81,10 +81,7 @@ impl Environment {
     }
 
     /// Registers an entity that wants to join this evironment.
-    pub fn register_joining_entity(
-        &mut self,
-        mut entity: Entity,
-    ) -> Result<(), Error> {
+    pub fn register_joining_entity(&mut self, mut entity: Entity) -> Result<(), Error> {
         // Data required by the joining entity
         let out_chan = unlock!(self.out_chan).add_rx();
         let sig_term = unlock!(self.drop_notifier).get_handle();
@@ -100,10 +97,7 @@ impl Environment {
     }
 
     /// Registers and entity that wants to affect this environment.
-    pub fn register_affecting_entity(
-        &mut self,
-        mut entity: Entity,
-    ) -> Result<(), Error> {
+    pub fn register_affecting_entity(&mut self, mut entity: Entity) -> Result<(), Error> {
         // Data required by the affecting entity
         let env_waker = self.waker.clone();
         entity.affect_environment(&self.name, env_waker)?;
@@ -153,8 +147,7 @@ impl Future for Environment {
             // TODO: maybe make this a for-loop with some predefined max number
             // of effects to not block other futures from making
             // progress
-            let mut num_received =
-                self.num_received_effects.load(Ordering::Acquire);
+            let mut num_received = self.num_received_effects.load(Ordering::Acquire);
 
             let mut num = 0;
             loop {
@@ -174,9 +167,7 @@ impl Future for Environment {
                         // Wake all joined entities if half of the broadcaster
                         // buffer size if full
                         if num == BROADCAST_BUFFER_SIZE / 2 {
-                            for JoinedEntity { entity: _, waker } in
-                                joined.iter()
-                            {
+                            for JoinedEntity { entity: _, waker } in joined.iter() {
                                 waker.task.notify();
                             }
 
@@ -187,8 +178,7 @@ impl Future for Environment {
                     _ => break,
                 }
             }
-            self.num_received_effects
-                .store(num_received + num, Ordering::Release);
+            self.num_received_effects.store(num_received + num, Ordering::Release);
 
             for JoinedEntity { entity: _, waker } in joined.iter() {
                 waker.task.notify();

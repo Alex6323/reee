@@ -8,9 +8,9 @@ pub mod macros;
 /// Creates a supervisor, and environment X, and an entity
 pub fn get_supervisor_environment_entity() -> (Supervisor, Environment, Entity)
 {
-    let mut sv = Supervisor::new().expect("creating supervisor");
-    let env = sv.create_environment("X").expect("creating environment X");
-    let ent =
-        sv.create_entity(vec!["X"]).expect("creating an entity joining X");
-    (sv, env, ent)
+    let mut sv = Supervisor::new().unwrap();
+    let x = sv.create_environment("X").unwrap();
+    let mut a = sv.create_entity().unwrap();
+    sv.join_environments(&mut a, vec![&x.name()]).unwrap();
+    (sv, x, a)
 }

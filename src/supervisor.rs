@@ -21,14 +21,22 @@ use tokio::runtime::Runtime;
 /// ```
 /// use reee::supervisor::Supervisor;
 ///
+/// // Create a supervisor
 /// let mut sv = Supervisor::new().unwrap();
 ///
+/// // Create two environments X, Y
 /// let x = sv.create_environment("X").unwrap();
 /// let y = sv.create_environment("Y").unwrap();
 ///
-/// let a = sv.create_entity(vec!["X"]).unwrap();
-/// let b = sv.create_entity(vec!["X", "Y"]).unwrap();
+/// // Create two entities
+/// let mut a = sv.create_entity().unwrap();
+/// let mut b = sv.create_entity().unwrap();
 ///
+/// // Let them join environments
+/// sv.join_environments(&mut a, vec![&x.name()]).unwrap();
+/// sv.join_environments(&mut b, vec![&x.name(), &y.name()]).unwrap();
+///
+/// // Submit two effects to each environment
 /// sv.submit_effect("hello", "X").unwrap();
 /// sv.submit_effect("world", "Y").unwrap();
 ///
@@ -75,6 +83,15 @@ impl EnvironmentLink {
 
 impl Supervisor {
     /// Creates a new supervisor.
+    ///
+    /// # Example
+    /// ```
+    /// use reee::supervisor::Supervisor;
+    ///
+    /// let sv = Supervisor::new().unwrap();
+    ///
+    /// sv.shutdown().unwrap();
+    /// ```
     pub fn new() -> Result<Self, Error> {
         Ok(Self {
             runtime: Runtime::new()?,
@@ -84,15 +101,19 @@ impl Supervisor {
         })
     }
 
-    /// Create a new environment.
-    pub fn create_environment(
-        &mut self,
-        name: &str,
-    ) -> Result<Environment, Error> {
+    /// Creates a new environment.
+    ///
+    /// # Example
+    /// ```
+    /// use reee::supervisor::Supervisor;
+    ///
+    /// let mut sv = Supervisor::new().unwrap();
+    ///
+    /// sv.create_environment("X").unwrap();
+    /// ```
+    pub fn create_environment(&mut self, name: &str) -> Result<Environment, Error> {
         if self.environments.contains_key(name) {
-            return Err(Error::App(
-                "Environment with that name already exists.",
-            ));
+            return Err(Error::App("Environment with that name already exists."));
         }
 
         // Create a communication channel between the supervisor and the new
@@ -109,11 +130,8 @@ impl Supervisor {
 
         // Create a link between the supervisor and the new environment through
         // which the supervisor will send messages to the environment.
-        let link = EnvironmentLink {
-            sender,
-            environment: env.clone(),
-            waker: env.get_waker(),
-        };
+        let link =
+            EnvironmentLink { sender, environment: env.clone(), waker: env.get_waker() };
 
         // Store the link
         self.environments.insert(name.into(), link);
@@ -125,6 +143,17 @@ impl Supervisor {
     }
 
     /// Delete an environment.
+    ///
+    /// # Example
+    /// ```
+    /// use reee::supervisor::Supervisor;
+    ///
+    /// let mut sv = Supervisor::new().unwrap();
+    ///
+    /// let x = sv.create_environment("X").unwrap();
+    ///
+    /// sv.delete_environment(&x.name()).unwrap();
+    /// ```
     pub fn delete_environment(&mut self, env_name: &str) -> Result<(), Error> {
         match self.environments.remove(env_name) {
             Some(link) => {
@@ -138,43 +167,96 @@ impl Supervisor {
         }
     }
 
-    /// Create an entity and attach it to one or multiple environments.
-    pub fn create_entity(
+    /// Create an entity.
+    ///
+    /// # Example
+    /// ```
+    /// use reee::supervisor::Supervisor;
+    ///
+    /// let mut sv = Supervisor::new().unwrap();
+    ///
+    /// sv.create_entity().unwrap();
+    /// ```
+    pub fn create_entity(&mut self) -> Result<Entity, Error> {
+        let entity = Entity::new(self.graceful_shutdown.get_listener());
+
+        // Store the entity
+        self.entities.insert(entity.uuid(), entity.clone());
+
+        // Spawn the Entity future onto the Tokio runtime
+        self.runtime.spawn(entity.clone().map_err(|_| ()));
+
+        Ok(entity)
+    }
+
+    /// Lets the specified entity join one or multiple environments.
+    ///
+    /// # Example
+    /// ```
+    /// use reee::supervisor::Supervisor;
+    ///
+    /// let mut sv = Supervisor::new().unwrap();
+    /// let x = sv.create_environment("X").unwrap();
+    /// let mut a = sv.create_entity().unwrap();
+    ///
+    /// sv.join_environments(&mut a, vec![&x.name()]).unwrap();
+    /// ```
+    pub fn join_environments(
         &mut self,
+        entity: &mut Entity,
         environments: Vec<&str>,
-    ) -> Result<Entity, Error> {
+    ) -> Result<(), Error> {
         // Check, if all given environments are known to this supervisor
-        if !environments
-            .iter()
-            .all(|env_name| self.environments.contains_key(*env_name))
+        if !environments.iter().all(|env_name| self.environments.contains_key(*env_name))
         {
             return Err(Error::App(
                 "At least one of the specified environments is unknown to this supervisor.",
             ));
         }
 
-        // Get a shutdown listener for notifiying the environment in case of
-        // supervisor shutdown
-        let shutdown_listener = self.graceful_shutdown.get_listener();
-
-        // Create a new entity which will subscribe to the specified
-        // environments
-        let ent = Entity::new(shutdown_listener);
-
         // Let the entity join all specified environments
         for env_name in environments.iter() {
             let link = self.environments.get_mut(*env_name).unwrap();
             let env = link.get_env_mut();
-            env.register_joining_entity(ent.clone())?;
+            env.register_joining_entity(entity.clone())?;
         }
 
-        // Store the entity
-        self.entities.insert(ent.uuid(), ent.clone());
+        Ok(())
+    }
 
-        // Spawn the Entity future onto the Tokio runtime
-        self.runtime.spawn(ent.clone().map_err(|_| ()));
+    /// Lets the specified entity affect one or multiple environments.
+    ///
+    /// # Example
+    /// ```
+    /// use reee::supervisor::Supervisor;
+    ///
+    /// let mut sv = Supervisor::new().unwrap();
+    /// let x = sv.create_environment("X").unwrap();
+    /// let mut a = sv.create_entity().unwrap();
+    ///
+    /// sv.affect_environments(&mut a, vec![&x.name()]).unwrap();
+    /// ```
+    pub fn affect_environments(
+        &mut self,
+        entity: &mut Entity,
+        environments: Vec<&str>,
+    ) -> Result<(), Error> {
+        // Check, if all given environments are known to this supervisor
+        if !environments.iter().all(|env_name| self.environments.contains_key(*env_name))
+        {
+            return Err(Error::App(
+                "At least one of the specified environments is unknown to this supervisor.",
+            ));
+        }
 
-        Ok(ent)
+        // Let the entity affect all specified environments
+        for env_name in environments.iter() {
+            let link = self.environments.get_mut(*env_name).unwrap();
+            let env = link.get_env_mut();
+            env.register_affecting_entity(entity.clone())?;
+        }
+
+        Ok(())
     }
 
     /// Delete an entity.
@@ -193,11 +275,7 @@ impl Supervisor {
     }
 
     /// Submit an effect to an enviroment.
-    pub fn submit_effect(
-        &mut self,
-        effect: &str,
-        env_name: &str,
-    ) -> Result<(), Error> {
+    pub fn submit_effect(&mut self, effect: &str, env_name: &str) -> Result<(), Error> {
         match self.environments.get(env_name) {
             Some(env_link) => {
                 match env_link.sender.send(effect.into()) {
@@ -212,11 +290,7 @@ impl Supervisor {
                 // and do some work
                 env_link.waker.task.notify();
             }
-            None => {
-                return Err(Error::App(
-                    "No environment with this name available",
-                ))
-            }
+            None => return Err(Error::App("No environment with this name available")),
         }
 
         Ok(())
@@ -262,91 +336,76 @@ mod tests {
     use super::*;
 
     #[test]
-    fn create_and_shutdown() {
-        let sv = Supervisor::new().expect("creating supervisor");
-        sv.shutdown().expect("shutting down");
-    }
-
-    #[test]
-    fn create_non_joining_entity() {
-        let mut sv = Supervisor::new().expect("creating supervisor");
-        sv.create_entity(vec![]).expect("creating entity");
-        sv.shutdown().expect("shutting down");
-    }
-
-    #[test]
     fn create_two_different_environments() {
-        let mut sv = Supervisor::new().expect("creating supervisor");
+        let mut sv = Supervisor::new().unwrap();
 
-        sv.create_environment("X").expect("creating X");
-        sv.create_environment("Y").expect("creating Y");
+        sv.create_environment("X").unwrap();
+        sv.create_environment("Y").unwrap();
 
         assert_eq!(2, sv.num_environments());
-
-        sv.shutdown().expect("shutting down");
     }
 
     // Cannot create the same environment twice
     #[should_panic]
     #[test]
     fn forbid_creating_the_same_environment_twice() {
-        let mut sv = Supervisor::new().expect("creating supervisor");
+        let mut sv = Supervisor::new().unwrap();
 
-        sv.create_environment("X").expect("creating X");
-        sv.create_environment("X").expect("creating X");
-
-        sv.shutdown().expect("shutting down");
+        sv.create_environment("X").unwrap();
+        sv.create_environment("X").unwrap();
     }
 
     #[test]
     fn create_and_delete_environment() {
-        let mut sv = Supervisor::new().expect("creating supervisor");
+        let mut sv = Supervisor::new().unwrap();
 
-        sv.create_environment("X").expect("creating X");
+        let x = sv.create_environment("X").unwrap();
         assert_eq!(1, sv.num_environments());
 
-        sv.delete_environment("X").expect("deleting X");
+        sv.delete_environment(&x.name()).unwrap();
         assert_eq!(0, sv.num_environments());
-
-        sv.shutdown().expect("shutting down");
     }
 
     #[test]
     fn submit_two_effects() {
-        let mut sv = Supervisor::new().expect("creating supervisor");
-        let env = sv.create_environment("X").expect("creating X");
-        let ent = sv.create_entity(vec!["X"]).expect("creating entity");
+        let mut sv = Supervisor::new().unwrap();
 
-        sv.submit_effect("hello", "X").expect("submitting effect 1");
-        sv.submit_effect("world", "X").expect("submitting effect 2");
+        let x = sv.create_environment("X").unwrap();
+        let mut a = sv.create_entity().unwrap();
+
+        sv.join_environments(&mut a, vec![&x.name()]).unwrap();
+
+        sv.submit_effect("hello", &x.name()).unwrap();
+        sv.submit_effect("world", &x.name()).unwrap();
 
         // Wait a little until the effects have propagated
         std::thread::sleep(std::time::Duration::from_millis(100));
 
-        assert_eq!(2, env.num_received_effects());
-        assert_eq!(2, ent.num_received_effects());
-
-        sv.shutdown().expect("shutting down");
+        assert_eq!(2, x.num_received_effects());
+        assert_eq!(2, a.num_received_effects());
     }
 
     #[test]
     fn submit_many_effects_to_two_entities() {
-        let mut sv = Supervisor::new().expect("creating supervisor");
-        let env = sv.create_environment("X").expect("creating X");
-        let ent_1 = sv.create_entity(vec!["X"]).expect("creating entity");
-        let ent_2 = sv.create_entity(vec!["X"]).expect("creating entity");
+        let mut sv = Supervisor::new().unwrap();
+
+        let x = sv.create_environment("X").unwrap();
+
+        let mut a = sv.create_entity().unwrap();
+        let mut b = sv.create_entity().unwrap();
+
+        sv.join_environments(&mut a, vec![&x.name()]).unwrap();
+        sv.join_environments(&mut b, vec![&x.name()]).unwrap();
 
         for i in 0..729 {
-            sv.submit_effect(&i.to_string(), "X").expect("submitting effect");
+            sv.submit_effect(&i.to_string(), &x.name()).unwrap();
         }
 
         // Wait a little until the effects have propagated
         std::thread::sleep(std::time::Duration::from_millis(100));
 
-        assert_eq!(729, env.num_received_effects());
-        assert_eq!(729, ent_1.num_received_effects());
-        assert_eq!(729, ent_2.num_received_effects());
-
-        sv.shutdown().expect("shutting down");
+        assert_eq!(729, x.num_received_effects());
+        assert_eq!(729, a.num_received_effects());
+        assert_eq!(729, b.num_received_effects());
     }
 }

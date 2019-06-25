@@ -1,7 +1,7 @@
 imports_layout = "Vertical"
-max_width = 80
+max_width = 90
 use_small_heuristics = "Max"
 wrap_comments = true
-comment_width = 80
+comment_width = 90
 edition = "2018"
 error_on_line_overflow = true
