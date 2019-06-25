@@ -21,16 +21,24 @@ use tokio::runtime::Runtime;
 /// ```
 /// use reee::supervisor::Supervisor;
 ///
-/// let mut sv = Supervisor::new().expect("creating supervisor");
+/// let mut sv = Supervisor::new().unwrap();
 ///
-/// let _x = sv.create_environment("X").expect("error creating environment");
-/// let _y = sv.create_environment("Y").expect("error creating environment");
+/// let x = sv.create_environment("X").unwrap();
+/// let y = sv.create_environment("Y").unwrap();
 ///
-/// let _a = sv.create_entity(vec!["X"]).expect("error creating entity");
-/// let _b = sv.create_entity(vec!["X", "Y"]).expect("error creating entity");
+/// let a = sv.create_entity(vec!["X"]).unwrap();
+/// let b = sv.create_entity(vec!["X", "Y"]).unwrap();
 ///
-/// sv.submit_effect("hello", "X").expect("error sending message");
-/// sv.submit_effect("world", "Y").expect("error sending message");
+/// sv.submit_effect("hello", "X").unwrap();
+/// sv.submit_effect("world", "Y").unwrap();
+///
+/// // Wait a little for effects to propagate
+/// std::thread::sleep(std::time::Duration::from_millis(500));
+///
+/// assert_eq!(1, x.num_received_effects());
+/// assert_eq!(1, y.num_received_effects());
+/// assert_eq!(1, a.num_received_effects());
+/// assert_eq!(2, b.num_received_effects());
 /// ```
 pub struct Supervisor {
     // The supervisor runtime
