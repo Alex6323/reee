@@ -1,8 +1,6 @@
 use ::reee::supervisor::Supervisor;
 
-#[test]
-fn a_test() {
-    let mut sv = Supervisor::new();
+#[macro_use]
+mod common;
 
-    assert_eq!(0, sv.num_environments());
-}
+use crate::common::*;

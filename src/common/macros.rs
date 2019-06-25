@@ -6,6 +6,7 @@ macro_rules! sleep {
     };
 }
 
+#[cfg(test)]
 macro_rules! sleep_ns {
     ($duration:expr) => {
         std::thread::sleep(std::time::Duration::from_nanos($duration));
