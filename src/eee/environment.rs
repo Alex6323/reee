@@ -53,6 +53,8 @@ pub(crate) struct JoinedEntity {
 }
 
 pub(crate) struct AffectingEntity {
+    /// Entity uuid
+    pub ent_uuid: String,
     /// Entity effect receiver
     pub ent_rx: BroadcastReceiver<Effect>,
     /// Entity drop signal receiver
@@ -148,7 +150,8 @@ impl Future for Environment {
         // As long as effects can be received go on broadcasting them
         {
             let joined = unlock!(self.joined_entities);
-            let mut out_chan = unlock!(self.out_chan);
+            let mut affecting = unlock!(self.affecting_entities);
+            let mut env_tx = unlock!(self.out_chan);
 
             // TODO: maybe make this a for-loop with some predefined max number
             // of effects to not block other futures from making
@@ -156,6 +159,8 @@ impl Future for Environment {
             let mut num_received = self.num_received_effects.load(Ordering::Acquire);
 
             let mut num = 0;
+
+            // Forward incoming effects from the supervisor to all subscribed entities
             loop {
                 // Try to receive a new effect from the supervisor
                 match self.in_chan.try_recv() {
@@ -170,7 +175,7 @@ impl Future for Environment {
                         );
 
                         // Broadcast received effect to joined entities
-                        out_chan.broadcast(effect);
+                        env_tx.broadcast(effect);
 
                         // Wake all joined entities if half of the broadcaster
                         // buffer size is full
@@ -185,14 +190,40 @@ impl Future for Environment {
                     }
                     _ => break,
                 }
-            }
-            self.num_received_effects.store(num_received + num, Ordering::Release);
+            } // end forwarding supervisor effects
 
             // Wake all joined entities to process the remaining effects buffered in the
             // broadcast channel
             for JoinedEntity { ent_waker } in joined.iter() {
                 ent_waker.task.notify();
             }
+
+            num_received += num;
+            num = 0;
+
+            //
+            for AffectingEntity { ent_uuid, ent_rx, ent_drop_rx: _ } in
+                affecting.iter_mut()
+            {
+                loop {
+                    match ent_rx.try_recv() {
+                        Ok(effect) => {
+                            num += 1;
+
+                            println!(
+                                "Env. {} received effect '{}' from entity {} ({})",
+                                self.name,
+                                effect,
+                                &ent_uuid[0..5],
+                                num_received + num,
+                            );
+                        }
+                        _ => break,
+                    }
+                }
+            }
+
+            self.num_received_effects.store(num_received + num, Ordering::Release);
         }
 
         // Check for shutdown signal

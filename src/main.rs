@@ -113,11 +113,12 @@ fn test5() {
 
     let x = sv.create_environment("X").unwrap();
     let y = sv.create_environment("Y").unwrap();
+    let z = sv.create_environment("Z").unwrap();
 
     let mut a = sv.create_entity().unwrap();
 
     sv.join_environments(&mut a, vec![&x.name()]).unwrap();
-    sv.affect_environments(&mut a, vec![&y.name()]).unwrap();
+    sv.affect_environments(&mut a, vec![&y.name(), &z.name()]).unwrap();
 
     sv.submit_effect("hello", &x.name()).unwrap();
 

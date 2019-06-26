@@ -74,20 +74,6 @@ pub(crate) struct EntityConnection {
     pub entity: Entity,
 }
 
-/*
-impl EnvironmentLink {
-    /// Returns a mutable reference to the environment
-    pub fn get_env_mut(&mut self) -> &mut Environment {
-        &mut self.environment
-    }
-
-    /// Returns a reference to the environment
-    pub fn get_env(&self) -> &Environment {
-        &self.environment
-    }
-}
-*/
-
 impl Supervisor {
     /// Creates a new supervisor.
     ///
@@ -346,8 +332,8 @@ impl Supervisor {
 
     /// Shuts down the supervisor on CTRL-C.
     pub fn wait_for_kill_signal(self) -> Result<(), Error> {
-        // Wait for CTRL-C
-        println!("Waiting for user interaction...",);
+        println!("Waiting for Ctrl-C...",);
+
         self.graceful_shutdown.wait_for_ctrl_c();
 
         println!();

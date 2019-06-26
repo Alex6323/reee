@@ -111,10 +111,11 @@ impl Entity {
         // Store the name and the receiver handle of that environment
         affected.insert(env_name.into(), AffectedEnvironment { env_waker });
 
+        let ent_uuid = self.uuid.clone();
         let ent_rx = unlock!(self.out_chan).add_rx();
         let ent_drop_rx = unlock!(self.drop_notifier).get_handle();
 
-        Ok(AffectingEntity { ent_rx, ent_drop_rx })
+        Ok(AffectingEntity { ent_uuid, ent_rx, ent_drop_rx })
     }
 
     /// Notify affected environments, that this entity will be dropped.
@@ -175,6 +176,10 @@ impl Entity {
     }
 }
 
+fn process_effect(effect: Effect) -> Effect {
+    effect.chars().rev().collect::<String>()
+}
+
 impl Future for Entity {
     type Item = ();
     type Error = io::Error;
@@ -211,15 +216,15 @@ impl Future for Entity {
                                 num += 1;
 
                                 println!(
-                                    "Ent. {} received effect '{}' from environment '{}' ({})",
+                                    "Ent. {} received effect '{}' from environment {} ({})",
                                     &self.uuid[0..5],
                                     effect,
                                     env,
                                     num_effects + num,
                                 );
 
-                                // --- PROCESS EFFECT ---
-                                // TODO: let the connected Qubic process the effect
+                                // Process the effect data
+                                let effect = process_effect(effect);
 
                                 // Broadcast result to affected environments
                                 out_chan.broadcast(effect);
