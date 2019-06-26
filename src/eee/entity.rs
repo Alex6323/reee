@@ -1,6 +1,8 @@
 //! Entity
 
 use super::effect::Effect;
+use super::environment::AffectingEntity;
+use crate::common::trigger::Trigger;
 use crate::common::trigger::TriggerHandle;
 use crate::common::watcher::Watcher;
 use crate::constants::BROADCAST_BUFFER_SIZE;
@@ -17,112 +19,116 @@ use std::sync::{
 };
 
 use bus::Bus as Broadcaster;
-use bus::BusReader as Receiver;
+use bus::BusReader as BroadcastReceiver;
 use tokio::{
     io,
     prelude::*,
 };
 use uuid::Uuid;
 
+type Name = String;
+
 /// An entity in the EEE model.
 pub struct Entity {
     /// A unique identifier of this entity.
     uuid: String,
     /// The environments this entity has joined.
-    joined_environments: Arc<Mutex<HashMap<String, JoinedEnvironment>>>,
+    joined_environments: Arc<Mutex<HashMap<Name, JoinedEnvironment>>>,
     /// The environments this entity affects.
-    affected_environments: Arc<Mutex<HashMap<String, AffectedEnvironment>>>,
+    affected_environments: Arc<Mutex<HashMap<Name, AffectedEnvironment>>>,
     /// Sender half of the outgoing broadcast channel for affecting
-    /// environments
+    /// environments.
     out_chan: Arc<Mutex<Broadcaster<Effect>>>,
+    /// A notifier that signals the end of this entity to affected environments
+    drop_notifier: Arc<Mutex<Trigger>>,
     /// A handle to signal supervisor shutdown
     shutdown_listener: Arc<Mutex<TriggerHandle>>,
-    /// A waker to wake up this entitie's task/future
+    /// A waker to wake up this entity's task/future
     waker: Watcher,
     /// The number of received effects.
     num_received_effects: Arc<AtomicUsize>,
 }
 
-/// Encapsulation of necessary data received from a joined environment.
 struct JoinedEnvironment {
-    /// effect receiving channel half
-    pub in_chan: Receiver<Effect>,
-    /// environment sig term listener
-    pub term_sig: TriggerHandle,
+    /// Environment effect receiver
+    pub env_rx: BroadcastReceiver<Effect>,
+    /// Environment drop signal receiver
+    pub env_drop_rx: TriggerHandle,
 }
 
-/// Encapsulation of necessary data received from an affected environment.
 struct AffectedEnvironment {
-    /// a waker to wake the affected environment's task/future
+    /// A waker to wake the affected environment's task/future
     pub env_waker: Watcher,
 }
 
 impl Entity {
     /// Creates a new entity.
-    pub fn new(shutdown_listener: TriggerHandle) -> Self {
-        let waker = Watcher::new();
+    pub(crate) fn new(shutdown_listener: TriggerHandle) -> Self {
         Self {
             uuid: Uuid::new_v4().to_string(),
             joined_environments: shared_mut!(HashMap::new()),
             affected_environments: shared_mut!(HashMap::new()),
             out_chan: shared_mut!(Broadcaster::new(BROADCAST_BUFFER_SIZE)),
+            drop_notifier: shared_mut!(Trigger::new()),
             shutdown_listener: shared_mut!(shutdown_listener),
-            waker,
+            waker: Watcher::new(),
             num_received_effects: shared!(AtomicUsize::new(0)),
         }
     }
 
     /// Registers an environment as joined by this entity.
-    pub fn join_environment(
+    pub(crate) fn join_environment(
         &mut self,
-        name: &str,
-        in_chan: Receiver<Effect>,
-        term_sig: TriggerHandle,
-    ) -> Result<(), Error> {
+        env_name: &str,
+        env_rx: BroadcastReceiver<Effect>,
+        env_drop_rx: TriggerHandle,
+    ) -> Result<Watcher, Error> {
         //
         let mut joined = unlock!(self.joined_environments);
 
-        if joined.contains_key(name) {
+        if joined.contains_key(env_name) {
             return Err(Error::App("This entity already joined that environment"));
         }
 
         // Store the name and an environment listener
-        joined.insert(name.into(), JoinedEnvironment { in_chan, term_sig });
+        joined.insert(env_name.into(), JoinedEnvironment { env_rx, env_drop_rx });
 
-        Ok(())
+        Ok(self.waker.clone())
     }
 
     /// Registers an environment as affected by this entity.
-    pub fn affect_environment(
+    pub(crate) fn affect_environment(
         &mut self,
         env_name: &str,
         env_waker: Watcher,
-    ) -> Result<(), Error> {
+    ) -> Result<AffectingEntity, Error> {
+        //
         let mut affected = unlock!(self.affected_environments);
 
-        if affected.contains_key(env_name) {
+        if affected.contains_key(env_name.into()) {
             return Err(Error::App("This entity already affects that environment"));
         }
-
         // Store the name and the receiver handle of that environment
         affected.insert(env_name.into(), AffectedEnvironment { env_waker });
+
+        let ent_rx = unlock!(self.out_chan).add_rx();
+        let ent_drop_rx = unlock!(self.drop_notifier).get_handle();
+
+        Ok(AffectingEntity { ent_rx, ent_drop_rx })
+    }
+
+    /// Notify affected environments, that this entity will be dropped.
+    pub(crate) fn send_sig_term(&self) -> Result<(), Error> {
+        unlock!(self.drop_notifier).pull()?;
+
+        println!("Entity '{}' sent sig_term", self.uuid);
 
         Ok(())
     }
 
     /// Returns the uuid of this entity.
-    pub fn uuid(&self) -> String {
-        self.uuid.clone()
-    }
-
-    /// Returns the number of effects that this entity has received.
-    pub fn num_received_effects(&self) -> usize {
-        self.num_received_effects.load(Ordering::Relaxed)
-    }
-
-    /// Returns a waker that allows to wake this entity's task/future.
-    pub fn get_waker(&self) -> Watcher {
-        self.waker.clone()
+    pub fn uuid(&self) -> &str {
+        &self.uuid
     }
 
     /// Returns a list of all environments this entity has joined.
@@ -162,6 +168,11 @@ impl Entity {
     pub fn num_affected(&self) -> usize {
         unlock!(self.affected_environments).len()
     }
+
+    /// Returns the number of effects that this entity has received.
+    pub fn num_received_effects(&self) -> usize {
+        self.num_received_effects.load(Ordering::Relaxed)
+    }
 }
 
 impl Future for Entity {
@@ -177,6 +188,9 @@ impl Future for Entity {
             let mut num = 0;
 
             let mut joined = unlock!(self.joined_environments);
+            let affected = unlock!(self.affected_environments);
+
+            let mut out_chan = unlock!(self.out_chan);
             let mut to_drop = vec![];
 
             'outer: loop {
@@ -184,14 +198,15 @@ impl Future for Entity {
                 let mut num_dry = 0;
 
                 // Check each joined environment if there is a new effect
-                for (env, JoinedEnvironment { in_chan, term_sig: _ }) in joined.iter_mut()
+                for (env, JoinedEnvironment { env_rx, env_drop_rx: _ }) in
+                    joined.iter_mut()
                 {
                     // Try to receive as many effects as possible from that
                     // environment TODO: maybe make this a
                     // for-loop with an upper limit to give other
                     // futures time to progress as well
                     'inner: loop {
-                        match in_chan.try_recv() {
+                        match env_rx.try_recv() {
                             Ok(effect) => {
                                 num += 1;
 
@@ -201,7 +216,23 @@ impl Future for Entity {
                                     effect,
                                     env,
                                     num_effects + num,
-                                )
+                                );
+
+                                // --- PROCESS EFFECT ---
+                                // TODO: let the connected Qubic process the effect
+
+                                // Broadcast result to affected environments
+                                out_chan.broadcast(effect);
+
+                                // Wake all affected environments if half of the
+                                // broadcaster buffer size is full
+                                if num == BROADCAST_BUFFER_SIZE / 2 {
+                                    for (_, AffectedEnvironment { env_waker }) in
+                                        affected.iter()
+                                    {
+                                        env_waker.task.notify();
+                                    }
+                                }
                             }
                             _ => {
                                 num_dry += 1;
@@ -220,9 +251,15 @@ impl Future for Entity {
 
             self.num_received_effects.store(num_effects + num, Ordering::Release);
 
+            // Wake all affected environments to process the remaining effects buffered in
+            // the broadcast channel
+            for (_, AffectedEnvironment { env_waker }) in affected.iter() {
+                env_waker.task.notify();
+            }
+
             // Check if any environment sent a sig-term
-            for (env, JoinedEnvironment { in_chan: _, term_sig }) in joined.iter_mut() {
-                match term_sig.0.poll() {
+            for (env, JoinedEnvironment { env_rx: _, env_drop_rx }) in joined.iter_mut() {
+                match env_drop_rx.0.poll() {
                     Ok(Async::Ready(Some(is_term))) => {
                         if is_term {
                             println!(
@@ -276,6 +313,7 @@ impl Clone for Entity {
             joined_environments: Arc::clone(&self.joined_environments),
             affected_environments: Arc::clone(&self.affected_environments),
             out_chan: Arc::clone(&self.out_chan),
+            drop_notifier: Arc::clone(&self.drop_notifier),
             shutdown_listener: Arc::clone(&self.shutdown_listener),
             waker: self.waker.clone(),
             num_received_effects: Arc::clone(&self.num_received_effects),

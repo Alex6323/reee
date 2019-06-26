@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 fn main() {
-    test2();
+    test5();
 }
 
 // Simplest setup
@@ -86,6 +86,40 @@ fn test3() {
     for s in "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890".chars().map(|c| c.to_string()) {
         sv.submit_effect(&s, "X").expect("error sending msg");
     }
+
+    thread::sleep(Duration::from_millis(1000));
+
+    sv.wait_for_kill_signal().expect("error waiting for ctrl-c");
+}
+
+fn test4() {
+    let mut sv = Supervisor::new().unwrap();
+
+    let x = sv.create_environment("X").unwrap();
+    let y = sv.create_environment("Y").unwrap();
+    let mut a = sv.create_entity().unwrap();
+    sv.join_environments(&mut a, vec![&x.name()]).unwrap();
+    sv.affect_environments(&mut a, vec![&y.name()]).unwrap();
+
+    sv.submit_effect("hello", &x.name()).unwrap();
+
+    thread::sleep(Duration::from_millis(1000));
+
+    sv.wait_for_kill_signal().expect("error waiting for ctrl-c");
+}
+
+fn test5() {
+    let mut sv = Supervisor::new().unwrap();
+
+    let x = sv.create_environment("X").unwrap();
+    let y = sv.create_environment("Y").unwrap();
+
+    let mut a = sv.create_entity().unwrap();
+
+    sv.join_environments(&mut a, vec![&x.name()]).unwrap();
+    sv.affect_environments(&mut a, vec![&y.name()]).unwrap();
+
+    sv.submit_effect("hello", &x.name()).unwrap();
 
     thread::sleep(Duration::from_millis(1000));
 

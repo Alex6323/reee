@@ -31,7 +31,7 @@ impl GracefulShutdown {
     }
 
     /// Sends a termination signal to all holders of a handle.
-    pub fn send_term_sig(&mut self) -> Result<(), Error> {
+    pub fn send_sig_term(&mut self) -> Result<(), Error> {
         self.trigger.pull()
     }
 

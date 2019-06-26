@@ -20,6 +20,7 @@ use std::sync::{
 };
 
 use bus::Bus as Broadcaster;
+use bus::BusReader as BroadcastReceiver;
 use crossbeam_channel::Receiver;
 use tokio::prelude::*;
 
@@ -46,22 +47,21 @@ pub struct Environment {
     num_received_effects: Arc<AtomicUsize>,
 }
 
-/// Link between environment and an entity.
-struct JoinedEntity {
-    ///
-    entity: Entity,
+pub(crate) struct JoinedEntity {
     /// A waker to wake up the entity's task/future
-    pub waker: Watcher,
+    pub ent_waker: Watcher,
 }
 
-/// An abstraction
-struct AffectingEntity {
-    entity: Entity,
+pub(crate) struct AffectingEntity {
+    /// Entity effect receiver
+    pub ent_rx: BroadcastReceiver<Effect>,
+    /// Entity drop signal receiver
+    pub ent_drop_rx: TriggerHandle,
 }
 
 impl Environment {
     /// Creates a new environment.
-    pub fn new(
+    pub(crate) fn new(
         name: &str,
         in_chan: Receiver<Effect>,
         shutdown_listener: TriggerHandle,
@@ -81,15 +81,16 @@ impl Environment {
     }
 
     /// Registers an entity that wants to join this evironment.
-    pub fn register_joining_entity(&mut self, mut entity: Entity) -> Result<(), Error> {
-        // Data required by the joining entity
-        let out_chan = unlock!(self.out_chan).add_rx();
-        let sig_term = unlock!(self.drop_notifier).get_handle();
-        entity.join_environment(&self.name, out_chan, sig_term)?;
+    pub(crate) fn register_joining_entity(
+        &mut self,
+        entity: &mut Entity,
+    ) -> Result<(), Error> {
+        //
+        let env_rx = unlock!(self.out_chan).add_rx();
+        let env_drop_rx = unlock!(self.drop_notifier).get_handle();
 
-        // Data required by the joined environment
-        let ent_waker = entity.get_waker();
-        let joiner = JoinedEntity { entity, waker: ent_waker };
+        let ent_waker = entity.join_environment(&self.name, env_rx, env_drop_rx)?;
+        let joiner = JoinedEntity { ent_waker };
 
         unlock!(self.joined_entities).push(joiner);
 
@@ -97,27 +98,32 @@ impl Environment {
     }
 
     /// Registers and entity that wants to affect this environment.
-    pub fn register_affecting_entity(&mut self, mut entity: Entity) -> Result<(), Error> {
-        // Data required by the affecting entity
+    pub(crate) fn register_affecting_entity(
+        &mut self,
+        entity: &mut Entity,
+    ) -> Result<(), Error> {
+        //
         let env_waker = self.waker.clone();
-        entity.affect_environment(&self.name, env_waker)?;
 
-        // Data requied by the affected environment
-        let affector = AffectingEntity { entity: entity };
+        //
+        let affector = entity.affect_environment(&self.name, env_waker)?;
         unlock!(self.affecting_entities).push(affector);
 
         Ok(())
     }
 
     /// Inform joined entities that this environment is going to be dropped.
-    pub fn send_term_sig(&self) -> Result<(), Error> {
-        println!("Environment '{}' sending_term_sig", self.name);
-        unlock!(self.drop_notifier).pull()
+    pub(crate) fn send_sig_term(&self) -> Result<(), Error> {
+        unlock!(self.drop_notifier).pull()?;
+
+        println!("Environment '{}' sent sig_term", self.name);
+
+        Ok(())
     }
 
     /// Returns the uuid of this entity.
-    pub fn name(&self) -> String {
-        self.name.clone()
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     /// Returns the number of effects that this entity has received.
@@ -127,7 +133,7 @@ impl Environment {
     }
 
     /// Returns a waker that allows to wake this environments task/future.
-    pub fn get_waker(&self) -> Watcher {
+    pub(crate) fn get_waker(&self) -> Watcher {
         self.waker.clone()
     }
 }
@@ -157,18 +163,20 @@ impl Future for Environment {
                         num += 1;
 
                         println!(
-                            "Env. {} received effect '{}' ({})",
+                            "Env. {} received effect '{}' from supervisor ({})",
                             self.name,
                             effect,
                             num_received + num
                         );
+
+                        // Broadcast received effect to joined entities
                         out_chan.broadcast(effect);
 
                         // Wake all joined entities if half of the broadcaster
-                        // buffer size if full
+                        // buffer size is full
                         if num == BROADCAST_BUFFER_SIZE / 2 {
-                            for JoinedEntity { entity: _, waker } in joined.iter() {
-                                waker.task.notify();
+                            for JoinedEntity { ent_waker } in joined.iter() {
+                                ent_waker.task.notify();
                             }
 
                             num_received += num;
@@ -180,8 +188,10 @@ impl Future for Environment {
             }
             self.num_received_effects.store(num_received + num, Ordering::Release);
 
-            for JoinedEntity { entity: _, waker } in joined.iter() {
-                waker.task.notify();
+            // Wake all joined entities to process the remaining effects buffered in the
+            // broadcast channel
+            for JoinedEntity { ent_waker } in joined.iter() {
+                ent_waker.task.notify();
             }
         }
 

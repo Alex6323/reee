@@ -52,23 +52,29 @@ pub struct Supervisor {
     // The supervisor runtime
     runtime: Runtime,
     // Environments managed by the supervisor
-    environments: HashMap<String, EnvironmentLink>,
+    environments: HashMap<String, EnvironmentConnection>,
     // Entities managed by the supervisor
-    entities: HashMap<String, Entity>,
+    entities: HashMap<String, EntityConnection>,
     // Graceful shutdown of the supervisor and all started async tasks.
     graceful_shutdown: GracefulShutdown,
 }
 
-/// Link between the supervisor and an environment.
-pub struct EnvironmentLink {
+/// Connection between the supervisor and an environment.
+pub(crate) struct EnvironmentConnection {
     /// sender half of the channel between supervisor and environment
-    sender: Sender<String>,
+    pub sender: Sender<String>,
     /// the environment that is linked to the supervisor
-    environment: Environment,
+    pub environment: Environment,
     /// a notfier for waking up the environment task/future
     pub waker: Watcher,
 }
 
+/// Connection between the supervisor and an entity.
+pub(crate) struct EntityConnection {
+    pub entity: Entity,
+}
+
+/*
 impl EnvironmentLink {
     /// Returns a mutable reference to the environment
     pub fn get_env_mut(&mut self) -> &mut Environment {
@@ -80,6 +86,7 @@ impl EnvironmentLink {
         &self.environment
     }
 }
+*/
 
 impl Supervisor {
     /// Creates a new supervisor.
@@ -89,8 +96,6 @@ impl Supervisor {
     /// use reee::supervisor::Supervisor;
     ///
     /// let sv = Supervisor::new().unwrap();
-    ///
-    /// sv.shutdown().unwrap();
     /// ```
     pub fn new() -> Result<Self, Error> {
         Ok(Self {
@@ -130,11 +135,14 @@ impl Supervisor {
 
         // Create a link between the supervisor and the new environment through
         // which the supervisor will send messages to the environment.
-        let link =
-            EnvironmentLink { sender, environment: env.clone(), waker: env.get_waker() };
+        let conn = EnvironmentConnection {
+            sender,
+            environment: env.clone(),
+            waker: env.get_waker(),
+        };
 
         // Store the link
-        self.environments.insert(name.into(), link);
+        self.environments.insert(name.into(), conn);
 
         // Spawn the Environment future onto the Tokio runtime
         self.runtime.spawn(env.clone().map_err(|_| ()));
@@ -156,9 +164,9 @@ impl Supervisor {
     /// ```
     pub fn delete_environment(&mut self, env_name: &str) -> Result<(), Error> {
         match self.environments.remove(env_name) {
-            Some(link) => {
+            Some(env_conn) => {
                 // Inform subscribed entities that this environment is going to be dropped
-                link.environment.send_term_sig()?;
+                env_conn.environment.send_sig_term()?;
                 Ok(())
             }
             None => Err(Error::App(
@@ -181,12 +189,37 @@ impl Supervisor {
         let entity = Entity::new(self.graceful_shutdown.get_listener());
 
         // Store the entity
-        self.entities.insert(entity.uuid(), entity.clone());
+        self.entities
+            .insert(entity.uuid().into(), EntityConnection { entity: entity.clone() });
 
         // Spawn the Entity future onto the Tokio runtime
         self.runtime.spawn(entity.clone().map_err(|_| ()));
 
         Ok(entity)
+    }
+
+    /// Delete an entity.
+    ///
+    /// # Example
+    /// ```
+    /// use reee::supervisor::Supervisor;
+    ///
+    /// let mut sv = Supervisor::new().unwrap();
+    /// let mut a = sv.create_entity().unwrap();
+    ///
+    /// sv.delete_entity(a.uuid()).unwrap();
+    /// ```
+    pub fn delete_entity(&mut self, uuid: &str) -> Result<(), Error> {
+        match self.entities.remove(uuid) {
+            Some(ent_conn) => {
+                // Unsubscribe from all environments the entity has joined and
+                ent_conn.entity.send_sig_term()?;
+                Ok(())
+            }
+            None => Err(Error::App(
+                "There is no entity with that uuid managed by this supervisor.",
+            )),
+        }
     }
 
     /// Lets the specified entity join one or multiple environments.
@@ -203,7 +236,7 @@ impl Supervisor {
     /// ```
     pub fn join_environments(
         &mut self,
-        entity: &mut Entity,
+        mut entity: &mut Entity,
         environments: Vec<&str>,
     ) -> Result<(), Error> {
         // Check, if all given environments are known to this supervisor
@@ -216,9 +249,8 @@ impl Supervisor {
 
         // Let the entity join all specified environments
         for env_name in environments.iter() {
-            let link = self.environments.get_mut(*env_name).unwrap();
-            let env = link.get_env_mut();
-            env.register_joining_entity(entity.clone())?;
+            let conn = self.environments.get_mut(*env_name).unwrap();
+            conn.environment.register_joining_entity(&mut entity)?;
         }
 
         Ok(())
@@ -251,30 +283,24 @@ impl Supervisor {
 
         // Let the entity affect all specified environments
         for env_name in environments.iter() {
-            let link = self.environments.get_mut(*env_name).unwrap();
-            let env = link.get_env_mut();
-            env.register_affecting_entity(entity.clone())?;
+            let conn = self.environments.get_mut(*env_name).unwrap();
+            conn.environment.register_affecting_entity(entity)?;
         }
 
         Ok(())
     }
 
-    /// Delete an entity.
-    pub fn delete_entity(&mut self, uuid: &str) -> Result<Entity, Error> {
-        match self.entities.remove(uuid) {
-            Some(ent) => {
-                // Unsubscribe from all environments the entity has joined and
-                // affected ent.send_sigterm
-                //Ok(())
-                unimplemented!()
-            }
-            None => Err(Error::App(
-                "There is no entity with that uuid managed by this supervisor.",
-            )),
-        }
-    }
-
     /// Submit an effect to an enviroment.
+    ///
+    /// # Example
+    /// ```
+    /// use reee::supervisor::Supervisor;
+    ///
+    /// let mut sv = Supervisor::new().unwrap();
+    /// let x = sv.create_environment("X").unwrap();
+    ///
+    /// sv.submit_effect("hello", &x.name()).unwrap();
+    /// ```
     pub fn submit_effect(&mut self, effect: &str, env_name: &str) -> Result<(), Error> {
         match self.environments.get(env_name) {
             Some(env_link) => {
@@ -297,10 +323,19 @@ impl Supervisor {
     }
 
     /// Shuts down the supervisor programmatically without user intervention.
+    ///
+    /// # Example
+    /// ```
+    /// use reee::supervisor::Supervisor;
+    ///
+    /// let sv = Supervisor::new().unwrap();
+    ///
+    /// sv.shutdown().unwrap();
+    /// ```
     pub fn shutdown(mut self) -> Result<(), Error> {
         // Send the signal to make all infinite futures return
         // Ok(Async::Ready(None))
-        self.graceful_shutdown.send_term_sig()?;
+        self.graceful_shutdown.send_sig_term()?;
 
         println!("Shutting down...");
 
