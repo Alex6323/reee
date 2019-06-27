@@ -177,7 +177,10 @@ impl Entity {
 }
 
 fn process_effect(effect: Effect) -> Effect {
-    effect.chars().rev().collect::<String>()
+    match effect {
+        Effect::Ascii(s) => Effect::Ascii(s.chars().rev().collect::<String>()),
+        _ => Effect::Ascii(String::new()),
+    }
 }
 
 impl Future for Entity {
@@ -216,7 +219,7 @@ impl Future for Entity {
                                 num += 1;
 
                                 println!(
-                                    "Ent. {} received effect '{}' from environment {} ({})",
+                                    "Ent. {} received effect '{:?}' from environment {} ({})",
                                     &self.uuid[0..5],
                                     effect,
                                     env,

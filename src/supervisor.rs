@@ -2,6 +2,7 @@
 
 use crate::common::shutdown::GracefulShutdown;
 use crate::common::watcher::Watcher;
+use crate::eee::effect::Effect;
 use crate::eee::entity::Entity;
 use crate::eee::environment::Environment;
 use crate::errors::Error;
@@ -62,7 +63,7 @@ pub struct Supervisor {
 /// Connection between the supervisor and an environment.
 pub(crate) struct EnvironmentConnection {
     /// sender half of the channel between supervisor and environment
-    pub sender: Sender<String>,
+    pub sender: Sender<Effect>,
     /// the environment that is linked to the supervisor
     pub environment: Environment,
     /// a notfier for waking up the environment task/future
@@ -287,10 +288,10 @@ impl Supervisor {
     ///
     /// sv.submit_effect("hello", &x.name()).unwrap();
     /// ```
-    pub fn submit_effect(&mut self, effect: &str, env_name: &str) -> Result<(), Error> {
+    pub fn submit_effect(&mut self, effect: Effect, env_name: &str) -> Result<(), Error> {
         match self.environments.get(env_name) {
             Some(env_link) => {
-                match env_link.sender.send(effect.into()) {
+                match env_link.sender.send(effect) {
                     Err(_) => {
                         return Err(Error::App(
                             "Error sending the message to the environment",

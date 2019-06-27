@@ -168,7 +168,7 @@ impl Future for Environment {
                         num += 1;
 
                         println!(
-                            "Env. {} received effect '{}' from supervisor ({})",
+                            "Env. {} received effect '{:?}' from supervisor ({})",
                             self.name,
                             effect,
                             num_received + num
@@ -211,7 +211,7 @@ impl Future for Environment {
                             num += 1;
 
                             println!(
-                                "Env. {} received effect '{}' from entity {} ({})",
+                                "Env. {} received effect '{:?}' from entity {} ({})",
                                 self.name,
                                 effect,
                                 &ent_uuid[0..5],

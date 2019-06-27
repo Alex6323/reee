@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
+use ::reee::eee::effect::Effect;
 use ::reee::supervisor::Supervisor;
-
 use std::thread;
 use std::time::Duration;
 
@@ -27,7 +27,7 @@ fn test1() {
     thread::sleep(Duration::from_millis(500));
 
     println!(">>> Sending effect 'hello' to {}", x.name());
-    sv.submit_effect("hello", &x.name()).unwrap();
+    sv.submit_effect(Effect::Ascii("hello".into()), &x.name()).unwrap();
 
     thread::sleep(Duration::from_millis(1000));
 
@@ -56,10 +56,10 @@ fn test2() {
     thread::sleep(Duration::from_millis(500));
 
     println!(">>> Sending effect 'hello' to {}", x.name());
-    sv.submit_effect("hello", &x.name()).unwrap();
+    sv.submit_effect(Effect::Ascii("hello".into()), &x.name()).unwrap();
 
     println!(">>> Sending effect 'world' to {}", y.name());
-    sv.submit_effect("world", &y.name()).unwrap();
+    sv.submit_effect(Effect::Ascii("world".into()), &y.name()).unwrap();
 
     thread::sleep(Duration::from_millis(500));
 
@@ -84,7 +84,7 @@ fn test3() {
 
     println!(">>> Sending effects to X");
     for s in "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890".chars().map(|c| c.to_string()) {
-        sv.submit_effect(&s, "X").expect("error sending msg");
+        sv.submit_effect(Effect::Ascii(s), "X").expect("error sending msg");
     }
 
     thread::sleep(Duration::from_millis(1000));
@@ -101,7 +101,7 @@ fn test4() {
     sv.join_environments(&mut a, vec![&x.name()]).unwrap();
     sv.affect_environments(&mut a, vec![&y.name()]).unwrap();
 
-    sv.submit_effect("hello", &x.name()).unwrap();
+    sv.submit_effect(Effect::Ascii("hello".into()), &x.name()).unwrap();
 
     thread::sleep(Duration::from_millis(1000));
 
@@ -120,7 +120,7 @@ fn test5() {
     sv.join_environments(&mut a, vec![&x.name()]).unwrap();
     sv.affect_environments(&mut a, vec![&y.name(), &z.name()]).unwrap();
 
-    sv.submit_effect("hello", &x.name()).unwrap();
+    sv.submit_effect(Effect::Ascii("hello".into()), &x.name()).unwrap();
 
     thread::sleep(Duration::from_millis(1000));
 
