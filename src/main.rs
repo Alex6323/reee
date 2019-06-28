@@ -1,12 +1,13 @@
 #![allow(dead_code)]
 
 use ::reee::eee::effect::Effect;
+use ::reee::eee::entity::EntityCore;
 use ::reee::supervisor::Supervisor;
 use std::thread;
 use std::time::Duration;
 
 fn main() {
-    test5();
+    test6();
 }
 
 // Simplest setup
@@ -125,4 +126,41 @@ fn test5() {
     thread::sleep(Duration::from_millis(1000));
 
     sv.wait_for_kill_signal().expect("error waiting for ctrl-c");
+}
+
+struct Qubic;
+impl EntityCore for Qubic {
+    fn process_effect(&self, effect: Effect) -> Effect {
+        let result = match effect {
+            Effect::Ascii(s) => Effect::Ascii(s.chars().rev().collect::<String>()),
+            _ => Effect::Empty,
+        };
+        result
+    }
+}
+
+fn test6() {
+    let mut sv = Supervisor::new().unwrap();
+
+    let x = sv.create_environment("X").unwrap();
+    let y = sv.create_environment("Y").unwrap();
+
+    thread::sleep(Duration::from_millis(500));
+
+    let mut a = sv.create_entity().unwrap();
+    a.inject_core(Box::new(Qubic));
+    println!(">>> Created entity {} with core", &a.uuid()[0..5]);
+
+    // Join and affect
+    sv.join_environments(&mut a, vec![&x.name()]).unwrap();
+    sv.affect_environments(&mut a, vec![&y.name()]).unwrap();
+
+    thread::sleep(Duration::from_millis(500));
+
+    println!(">>> Sending effect 'hello' to {}", x.name());
+    sv.submit_effect(Effect::Ascii("hello".into()), &x.name()).unwrap();
+
+    thread::sleep(Duration::from_millis(1000));
+
+    sv.wait_for_kill_signal().unwrap();
 }

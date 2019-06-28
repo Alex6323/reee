@@ -1,5 +1,4 @@
 //! Implementation of EEE.
-
 #![deny(missing_docs)]
 
 #[macro_use]

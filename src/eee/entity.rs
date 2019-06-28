@@ -26,6 +26,12 @@ use tokio::{
 };
 use uuid::Uuid;
 
+/// Processes effects.
+pub trait EntityCore: Send {
+    ///
+    fn process_effect(&self, effect: Effect) -> Effect;
+}
+
 type Name = String;
 
 /// An entity in the EEE model.
@@ -47,6 +53,9 @@ pub struct Entity {
     waker: Watcher,
     /// The number of received effects.
     num_received_effects: Arc<AtomicUsize>,
+    /// The entity core
+    //core: Arc<Option<dyn Fn(Effect) -> Effect>>,
+    core: Arc<Mutex<Option<Box<dyn EntityCore>>>>,
 }
 
 struct JoinedEnvironment {
@@ -73,7 +82,14 @@ impl Entity {
             shutdown_listener: shared_mut!(shutdown_listener),
             waker: Watcher::new(),
             num_received_effects: shared!(AtomicUsize::new(0)),
+            core: shared_mut!(None),
         }
+    }
+
+    /// Injects an entity core.
+    pub fn inject_core(&mut self, ent_core: Box<dyn EntityCore>) {
+        let mut core = unlock!(self.core);
+        core.replace(ent_core);
     }
 
     /// Registers an environment as joined by this entity.
@@ -176,13 +192,6 @@ impl Entity {
     }
 }
 
-fn process_effect(effect: Effect) -> Effect {
-    match effect {
-        Effect::Ascii(s) => Effect::Ascii(s.chars().rev().collect::<String>()),
-        _ => Effect::Ascii(String::new()),
-    }
-}
-
 impl Future for Entity {
     type Item = ();
     type Error = io::Error;
@@ -197,6 +206,7 @@ impl Future for Entity {
 
             let mut joined = unlock!(self.joined_environments);
             let affected = unlock!(self.affected_environments);
+            let core = unlock!(self.core);
 
             let mut out_chan = unlock!(self.out_chan);
             let mut to_drop = vec![];
@@ -227,7 +237,13 @@ impl Future for Entity {
                                 );
 
                                 // Process the effect data
-                                let effect = process_effect(effect);
+                                let effect = match core
+                                    .as_ref()
+                                    .map(|core| core.process_effect(effect))
+                                {
+                                    Some(effect) => effect,
+                                    None => Effect::Empty,
+                                };
 
                                 // Broadcast result to affected environments
                                 out_chan.broadcast(effect);
@@ -325,6 +341,7 @@ impl Clone for Entity {
             shutdown_listener: Arc::clone(&self.shutdown_listener),
             waker: self.waker.clone(),
             num_received_effects: Arc::clone(&self.num_received_effects),
+            core: Arc::clone(&self.core),
         }
     }
 }

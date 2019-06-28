@@ -1,10 +1,20 @@
 //! Effect
 
+unsafe impl Send for Effect {}
+
 /// An effect in the EEE model.
 #[derive(Clone)]
 pub enum Effect {
+    /// Empty effect
+    Empty,
+    /// ASCII text
+    Ascii(String),
     ///
     Bytes(Vec<u8>),
+    ///
+    Trytes(Vec<char>),
+    ///
+    Trits(Vec<i8>),
     ///
     Bytes2([u8; 2]),
     ///
@@ -18,8 +28,6 @@ pub enum Effect {
     ///
     Bytes486([u8; 486]),
     ///
-    Trytes(Vec<char>),
-    ///
     Trytes3([char; 3]),
     ///
     Trytes9([char; 9]),
@@ -32,8 +40,6 @@ pub enum Effect {
     ///
     Trytes729([char; 729]),
     ///
-    Trits(Vec<i8>),
-    ///
     Trits9([i8; 9]),
     ///
     Trits27([i8; 27]),
@@ -45,8 +51,6 @@ pub enum Effect {
     Trits729([i8; 729]),
     ///
     Trits2187([i8; 2187]),
-    /// ASCII text
-    Ascii(String),
 }
 
 impl std::fmt::Debug for Effect {
@@ -54,6 +58,7 @@ impl std::fmt::Debug for Effect {
         match self {
             Effect::Bytes2(bytes) => write!(f, "[{}, {}]", bytes[0], bytes[1]),
             Effect::Ascii(text) => write!(f, "{}", text),
+            Effect::Empty => write!(f, "()"),
             _ => unimplemented!(),
         }
     }
