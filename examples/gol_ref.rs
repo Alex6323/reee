@@ -10,13 +10,13 @@ fn main() {
 
     let mut gol = random();
 
-    loop {
+    for i in 0.. {
         println!("{}", gol);
         std::thread::sleep(std::time::Duration::from_millis(UPDATE_INTERVAL));
         let start = Instant::now();
         gol.next_gen();
         let stop = start.elapsed();
-        println!("{}s:{}ns", stop.as_secs(), stop.subsec_nanos());
+        println!("#{} {}s:{}ns", i, stop.as_secs(), stop.subsec_nanos());
     }
 }
 
@@ -25,8 +25,8 @@ fn carlos() -> Universe {
 }
 
 fn random() -> Universe {
-    const WIDTH: usize = 50;
-    const HEIGHT: usize = 25;
+    const WIDTH: usize = 500;
+    const HEIGHT: usize = 250;
     let mut rng = rand::thread_rng();
 
     let mut gol = Universe::new(WIDTH, HEIGHT);
