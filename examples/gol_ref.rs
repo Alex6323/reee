@@ -1,24 +1,98 @@
 //! Game-of-life reference implementation
 
+use rand::Rng;
 use std::time::Instant;
+
+const UPDATE_INTERVAL: u64 = 50;
 
 fn main() {
     println!("Running Game-Of-Life reference implementation...");
 
-    let mut gol = Universe::new(10, 10);
-
-    gol.set_alive(2, 1);
-    gol.set_alive(2, 2);
-    gol.set_alive(2, 3);
+    let mut gol = random();
 
     loop {
         println!("{}", gol);
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(std::time::Duration::from_millis(UPDATE_INTERVAL));
         let start = Instant::now();
         gol.next_gen();
         let stop = start.elapsed();
         println!("{}s:{}ns", stop.as_secs(), stop.subsec_nanos());
     }
+}
+
+fn carlos() -> Universe {
+    unimplemented!()
+}
+
+fn random() -> Universe {
+    const WIDTH: usize = 50;
+    const HEIGHT: usize = 25;
+    let mut rng = rand::thread_rng();
+
+    let mut gol = Universe::new(WIDTH, HEIGHT);
+
+    for i in 0..WIDTH * HEIGHT {
+        let alive = rng.gen::<bool>();
+        let (x, y) = gol.get_position(i);
+        if alive {
+            gol.set_alive(x, y)
+        }
+    }
+
+    gol
+}
+
+fn spinner() -> Universe {
+    let mut gol = Universe::new(5, 5);
+
+    gol.set_alive(2, 1);
+    gol.set_alive(2, 2);
+    gol.set_alive(2, 3);
+
+    gol
+}
+
+fn glider_gun() -> Universe {
+    let mut gol = Universe::new(50, 25);
+
+    gol.set_alive(1, 5);
+    gol.set_alive(2, 5);
+    gol.set_alive(1, 6);
+    gol.set_alive(2, 6);
+    gol.set_alive(11, 5);
+    gol.set_alive(11, 6);
+    gol.set_alive(11, 7);
+    gol.set_alive(12, 8);
+    gol.set_alive(13, 9);
+    gol.set_alive(14, 9);
+    gol.set_alive(12, 4);
+    gol.set_alive(13, 3);
+    gol.set_alive(14, 3);
+    gol.set_alive(15, 6);
+    gol.set_alive(16, 4);
+    gol.set_alive(16, 8);
+    gol.set_alive(17, 7);
+    gol.set_alive(17, 6);
+    gol.set_alive(17, 5);
+    gol.set_alive(18, 6);
+    gol.set_alive(21, 3);
+    gol.set_alive(21, 4);
+    gol.set_alive(21, 5);
+    gol.set_alive(22, 3);
+    gol.set_alive(22, 4);
+    gol.set_alive(22, 5);
+    gol.set_alive(23, 2);
+    gol.set_alive(23, 6);
+    gol.set_alive(25, 1);
+    gol.set_alive(25, 2);
+    gol.set_alive(25, 6);
+    gol.set_alive(25, 7);
+    gol.set_alive(35, 3);
+    gol.set_alive(35, 4);
+    gol.set_alive(36, 3);
+    gol.set_alive(36, 4);
+
+    gol
 }
 
 #[repr(u8)]
@@ -163,13 +237,13 @@ impl std::fmt::Display for Universe {
 
             match cell {
                 Cell::Alive if x < self.width - 1 => {
-                    write!(f, "◼ ")?;
+                    write!(f, "◼")?;
                 }
                 Cell::Alive if x == self.width - 1 => {
                     writeln!(f, "◼")?;
                 }
                 Cell::Dead if x < self.width - 1 => {
-                    write!(f, "◻ ")?;
+                    write!(f, "◻")?;
                 }
                 Cell::Dead if x == self.width - 1 => {
                     writeln!(f, "◻")?;

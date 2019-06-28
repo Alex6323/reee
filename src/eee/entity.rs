@@ -54,7 +54,6 @@ pub struct Entity {
     /// The number of received effects.
     num_received_effects: Arc<AtomicUsize>,
     /// The entity core
-    //core: Arc<Option<dyn Fn(Effect) -> Effect>>,
     core: Arc<Mutex<Option<Box<dyn EntityCore>>>>,
 }
 

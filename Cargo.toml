@@ -25,4 +25,7 @@ path = "src/lib.rs"
 name = "reee"
 path = "src/main.rs"
 
+[dev-dependencies]
+rand = "0.7.0"
+
 
