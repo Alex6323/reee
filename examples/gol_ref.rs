@@ -3,21 +3,47 @@
 use rand::Rng;
 use std::time::Instant;
 
+use crossterm::{
+    cursor,
+    style,
+    terminal,
+    ClearType,
+    Color,
+};
+
 const UPDATE_INTERVAL: u64 = 50;
+const WIDTH: usize = 50;
+const HEIGHT: usize = 25;
 
 fn main() {
-    println!("Running Game-Of-Life reference implementation...");
+    run_gol();
+}
+
+fn run_gol() {
+    terminal().clear(ClearType::All).unwrap();
+
+    let cursor = cursor();
+
+    print_info("Running Game-Of-Life reference implementation...\n");
+
+    cursor.save_position();
 
     let mut gol = random();
 
     for i in 0.. {
-        println!("{}", gol);
+        println!("width={} height={} {}{}ms", WIDTH, HEIGHT, "\u{2764}", UPDATE_INTERVAL);
+        print!("{}", gol);
         std::thread::sleep(std::time::Duration::from_millis(UPDATE_INTERVAL));
         let start = Instant::now();
         gol.next_gen();
         let stop = start.elapsed();
-        println!("#{} {}s:{}ns", i, stop.as_secs(), stop.subsec_nanos());
+        println!("#{} {}{}s:{}ns", i, "\u{23f1}", stop.as_secs(), stop.subsec_nanos());
+        cursor.reset_position();
     }
+}
+
+pub fn print_info(info: &str) {
+    println!("{}", style(info.to_string()).with(Color::Yellow));
 }
 
 fn carlos() -> Universe {
@@ -25,8 +51,6 @@ fn carlos() -> Universe {
 }
 
 fn random() -> Universe {
-    const WIDTH: usize = 500;
-    const HEIGHT: usize = 250;
     let mut rng = rand::thread_rng();
 
     let mut gol = Universe::new(WIDTH, HEIGHT);
@@ -43,7 +67,7 @@ fn random() -> Universe {
 }
 
 fn spinner() -> Universe {
-    let mut gol = Universe::new(5, 5);
+    let mut gol = Universe::new(WIDTH, HEIGHT);
 
     gol.set_alive(2, 1);
     gol.set_alive(2, 2);
@@ -53,7 +77,7 @@ fn spinner() -> Universe {
 }
 
 fn glider_gun() -> Universe {
-    let mut gol = Universe::new(50, 25);
+    let mut gol = Universe::new(WIDTH, HEIGHT);
 
     gol.set_alive(1, 5);
     gol.set_alive(2, 5);
