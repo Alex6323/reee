@@ -128,8 +128,8 @@ fn test5() {
     sv.wait_for_kill_signal().expect("error waiting for ctrl-c");
 }
 
-struct Qubic;
-impl EntityCore for Qubic {
+struct ReverseQubic;
+impl EntityCore for ReverseQubic {
     fn process_effect(&self, effect: Effect) -> Effect {
         let result = match effect {
             Effect::Ascii(s) => Effect::Ascii(s.chars().rev().collect::<String>()),
@@ -139,24 +139,49 @@ impl EntityCore for Qubic {
     }
 }
 
+struct UppercaseQubic;
+impl EntityCore for UppercaseQubic {
+    fn process_effect(&self, effect: Effect) -> Effect {
+        let result = match effect {
+            Effect::Ascii(s) => Effect::Ascii(s.to_uppercase()),
+            _ => Effect::Empty,
+        };
+        result
+    }
+}
 fn test6() {
     let mut sv = Supervisor::new().unwrap();
 
+    // Input environment
     let x = sv.create_environment("X").unwrap();
+
+    // Return environments
     let y = sv.create_environment("Y").unwrap();
+    let z = sv.create_environment("Z").unwrap();
 
     thread::sleep(Duration::from_millis(500));
 
+    // An entity that reverses an ASCII string
     let mut a = sv.create_entity().unwrap();
-    a.inject_core(Box::new(Qubic));
-    println!(">>> Created entity {} with core", &a.uuid()[0..5]);
+    a.inject_core(Box::new(ReverseQubic));
+    println!(">>> Created entity {} that reverses ASCII strings", &a.uuid()[0..5]);
 
-    // Join and affect
+    // An entity that uppercases an ASCII string
+    let mut b = sv.create_entity().unwrap();
+    b.inject_core(Box::new(UppercaseQubic));
+    println!(">>> Created entity {} that uppercases ASCII strings", &b.uuid()[0..5]);
+
+    // Make both entities listen to environment X
     sv.join_environments(&mut a, vec![&x.name()]).unwrap();
+    sv.join_environments(&mut b, vec![&x.name()]).unwrap();
+
+    // Connect entity A to return environment Y, and entity B to Z.
     sv.affect_environments(&mut a, vec![&y.name()]).unwrap();
+    sv.affect_environments(&mut b, vec![&z.name()]).unwrap();
 
     thread::sleep(Duration::from_millis(500));
 
+    // Send 'hello' to input environment X
     println!(">>> Sending effect 'hello' to {}", x.name());
     sv.submit_effect(Effect::Ascii("hello".into()), &x.name()).unwrap();
 
