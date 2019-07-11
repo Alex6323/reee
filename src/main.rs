@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use ::reee::eee::effect::Effect;
-use ::reee::eee::entity::EntityCore;
+use ::reee::eee::entity::Entity;
 use ::reee::supervisor::Supervisor;
 use std::thread;
 use std::time::Duration;
@@ -28,7 +28,7 @@ fn test1() {
     thread::sleep(Duration::from_millis(500));
 
     println!(">>> Sending effect 'hello' to {}", x.name());
-    sv.submit_effect(Effect::Ascii("hello".into()), &x.name()).unwrap();
+    sv.submit_effect(Effect::from("hello"), &x.name()).unwrap();
 
     thread::sleep(Duration::from_millis(1000));
 
@@ -57,10 +57,10 @@ fn test2() {
     thread::sleep(Duration::from_millis(500));
 
     println!(">>> Sending effect 'hello' to {}", x.name());
-    sv.submit_effect(Effect::Ascii("hello".into()), &x.name()).unwrap();
+    sv.submit_effect(Effect::from("hello"), &x.name()).unwrap();
 
     println!(">>> Sending effect 'world' to {}", y.name());
-    sv.submit_effect(Effect::Ascii("world".into()), &y.name()).unwrap();
+    sv.submit_effect(Effect::from("world"), &y.name()).unwrap();
 
     thread::sleep(Duration::from_millis(500));
 
@@ -85,7 +85,7 @@ fn test3() {
 
     println!(">>> Sending effects to X");
     for s in "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890".chars().map(|c| c.to_string()) {
-        sv.submit_effect(Effect::Ascii(s), "X").expect("error sending msg");
+        sv.submit_effect(Effect::from(s), "X").expect("error sending msg");
     }
 
     thread::sleep(Duration::from_millis(1000));
@@ -102,7 +102,7 @@ fn test4() {
     sv.join_environments(&mut a, vec![&x.name()]).unwrap();
     sv.affect_environments(&mut a, vec![&y.name()]).unwrap();
 
-    sv.submit_effect(Effect::Ascii("hello".into()), &x.name()).unwrap();
+    sv.submit_effect(Effect::from("hello"), &x.name()).unwrap();
 
     thread::sleep(Duration::from_millis(1000));
 
@@ -121,7 +121,7 @@ fn test5() {
     sv.join_environments(&mut a, vec![&x.name()]).unwrap();
     sv.affect_environments(&mut a, vec![&y.name(), &z.name()]).unwrap();
 
-    sv.submit_effect(Effect::Ascii("hello".into()), &x.name()).unwrap();
+    sv.submit_effect(Effect::from("hello"), &x.name()).unwrap();
 
     thread::sleep(Duration::from_millis(1000));
 
@@ -129,10 +129,10 @@ fn test5() {
 }
 
 struct ReverseQubic;
-impl EntityCore for ReverseQubic {
-    fn process_effect(&self, effect: Effect) -> Effect {
+impl Entity for ReverseQubic {
+    fn process_effect(&mut self, effect: Effect) -> Effect {
         let result = match effect {
-            Effect::Ascii(s) => Effect::Ascii(s.chars().rev().collect::<String>()),
+            Effect::String(s) => Effect::from(s.chars().rev().collect::<String>()),
             _ => Effect::Empty,
         };
         result
@@ -140,15 +140,17 @@ impl EntityCore for ReverseQubic {
 }
 
 struct UppercaseQubic;
-impl EntityCore for UppercaseQubic {
-    fn process_effect(&self, effect: Effect) -> Effect {
+impl Entity for UppercaseQubic {
+    fn process_effect(&mut self, effect: Effect) -> Effect {
         let result = match effect {
-            Effect::Ascii(s) => Effect::Ascii(s.to_uppercase()),
+            Effect::String(s) => Effect::from(s.to_uppercase()),
             _ => Effect::Empty,
         };
         result
     }
 }
+
+// Customized Entities
 fn test6() {
     let mut sv = Supervisor::new().unwrap();
 
@@ -183,9 +185,27 @@ fn test6() {
 
     // Send 'hello' to input environment X
     println!(">>> Sending effect 'hello' to {}", x.name());
-    sv.submit_effect(Effect::Ascii("hello".into()), &x.name()).unwrap();
+    sv.submit_effect(Effect::from("hello"), &x.name()).unwrap();
 
     thread::sleep(Duration::from_millis(1000));
 
     sv.wait_for_kill_signal().unwrap();
+}
+
+// Entity sending effects
+fn test7() {
+    let mut sv = Supervisor::new().unwrap();
+
+    let x = sv.create_environment("X").unwrap();
+    let mut a = sv.create_entity().unwrap();
+    let mut b = sv.create_entity().unwrap();
+    let mut c = sv.create_entity().unwrap();
+
+    sv.affect_environments(&mut a, vec![&x.name()]).unwrap();
+
+    sv.join_environments(&mut b, vec![&x.name()]).unwrap();
+    sv.join_environments(&mut c, vec![&x.name()]).unwrap();
+
+    // NOTE: the effect will be enqueued and processed by the supervisor in FIFO style
+    //a.submit_effect(Effect::Ascii("hello".into()), &x.name()).unwrap();
 }

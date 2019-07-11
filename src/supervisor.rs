@@ -3,7 +3,7 @@
 use crate::common::shutdown::GracefulShutdown;
 use crate::common::watcher::Watcher;
 use crate::eee::effect::Effect;
-use crate::eee::entity::Entity;
+use crate::eee::entity::EntityHost;
 use crate::eee::environment::Environment;
 use crate::errors::Error;
 
@@ -72,7 +72,7 @@ pub(crate) struct EnvironmentConnection {
 
 /// Connection between the supervisor and an entity.
 pub(crate) struct EntityConnection {
-    pub entity: Entity,
+    pub entity: EntityHost,
 }
 
 impl Supervisor {
@@ -172,8 +172,8 @@ impl Supervisor {
     ///
     /// sv.create_entity().unwrap();
     /// ```
-    pub fn create_entity(&mut self) -> Result<Entity, Error> {
-        let entity = Entity::new(self.graceful_shutdown.get_listener());
+    pub fn create_entity(&mut self) -> Result<EntityHost, Error> {
+        let entity = EntityHost::new(self.graceful_shutdown.get_listener());
 
         // Store the entity
         self.entities
@@ -223,7 +223,7 @@ impl Supervisor {
     /// ```
     pub fn join_environments(
         &mut self,
-        mut entity: &mut Entity,
+        mut entity: &mut EntityHost,
         environments: Vec<&str>,
     ) -> Result<(), Error> {
         // Check, if all given environments are known to this supervisor
@@ -243,6 +243,15 @@ impl Supervisor {
         Ok(())
     }
 
+    /// Lets the specified entity leave one or multiple environments.
+    pub fn leave_environments(
+        &mut self,
+        mut _host: &mut EntityHost,
+        _environments: Vec<&str>,
+    ) {
+        //
+    }
+
     /// Lets the specified entity affect one or multiple environments.
     ///
     /// # Example
@@ -257,7 +266,7 @@ impl Supervisor {
     /// ```
     pub fn affect_environments(
         &mut self,
-        entity: &mut Entity,
+        entity: &mut EntityHost,
         environments: Vec<&str>,
     ) -> Result<(), Error> {
         // Check, if all given environments are known to this supervisor
@@ -276,6 +285,16 @@ impl Supervisor {
 
         Ok(())
     }
+
+    /*
+    pub fn stop_affecting_environments(
+        &mut self,
+        entity: &mut Entity,
+        environments: Vec<&str>,
+    ) -> Result<(), Error> {
+        //
+    }
+    */
 
     /// Submit an effect to an enviroment.
     ///

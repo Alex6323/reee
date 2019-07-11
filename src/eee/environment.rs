@@ -1,13 +1,14 @@
 //! Environment module.
 
 use super::effect::Effect;
+use super::entity::EntityHost;
+
 use crate::common::trigger::{
     Trigger,
     TriggerHandle,
 };
 use crate::common::watcher::Watcher;
 use crate::constants::BROADCAST_BUFFER_SIZE;
-use crate::eee::entity::Entity;
 use crate::errors::Error;
 
 use std::sync::atomic::{
@@ -85,7 +86,7 @@ impl Environment {
     /// Registers an entity that wants to join this evironment.
     pub(crate) fn register_joining_entity(
         &mut self,
-        entity: &mut Entity,
+        entity: &mut EntityHost,
     ) -> Result<(), Error> {
         //
         let env_rx = unlock!(self.out_chan).add_rx();
@@ -102,7 +103,7 @@ impl Environment {
     /// Registers and entity that wants to affect this environment.
     pub(crate) fn register_affecting_entity(
         &mut self,
-        entity: &mut Entity,
+        entity: &mut EntityHost,
     ) -> Result<(), Error> {
         //
         let env_waker = self.waker.clone();

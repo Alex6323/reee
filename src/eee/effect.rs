@@ -1,65 +1,109 @@
 //! Effect
 
-unsafe impl Send for Effect {}
+use std::sync::Arc;
 
-/// An effect in the EEE model.
-#[derive(Clone)]
-pub enum Effect {
-    /// Empty effect
-    Empty,
-    /// ASCII text
-    Ascii(String),
-    ///
-    Bytes(Vec<u8>),
-    ///
-    Trytes(Vec<char>),
-    ///
-    Trits(Vec<i8>),
-    ///
-    Bytes2([u8; 2]),
-    ///
-    Bytes6([u8; 6]),
-    ///
-    Bytes18([u8; 18]),
-    ///
-    Bytes54([u8; 54]),
-    ///
-    Bytes162([u8; 162]),
-    ///
-    Bytes486([u8; 486]),
-    ///
-    Trytes3([char; 3]),
-    ///
-    Trytes9([char; 9]),
-    ///
-    Trytes27([char; 27]),
-    ///
-    Trytes81([char; 81]),
-    ///
-    Trytes243([char; 243]),
-    ///
-    Trytes729([char; 729]),
-    ///
-    Trits9([i8; 9]),
-    ///
-    Trits27([i8; 27]),
-    ///
-    Trits81([i8; 81]),
-    ///
-    Trits243([i8; 243]),
-    ///
-    Trits729([i8; 729]),
-    ///
-    Trits2187([i8; 2187]),
+/// Represents an node event.
+#[allow(missing_docs)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Event {
+    ShutdownEvent,
+    GossipRecvEvent,
+    GossipSendEvent,
 }
 
-impl std::fmt::Debug for Effect {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Effect::Bytes2(bytes) => write!(f, "[{}, {}]", bytes[0], bytes[1]),
-            Effect::Ascii(text) => write!(f, "{}", text),
-            Effect::Empty => write!(f, "()"),
-            _ => unimplemented!(),
+/// Represents an Effect in the EEE model.
+#[allow(missing_docs)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Effect {
+    Empty,
+    Event(Event),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    Bool(bool),
+    Char(char),
+    String(Arc<String>),
+    Bytes(Arc<Vec<u8>>),
+}
+
+macro_rules! impl_from_primitive {
+    ($type:ty, $variant:ident) => {
+        impl From<$type> for Effect {
+            fn from(p: $type) -> Self {
+                Effect::$variant(p)
+            }
         }
+    };
+}
+
+impl_from_primitive!(u8, U8);
+impl_from_primitive!(u16, U16);
+impl_from_primitive!(u32, U32);
+impl_from_primitive!(u64, U64);
+impl_from_primitive!(i8, I8);
+impl_from_primitive!(i16, I16);
+impl_from_primitive!(i32, I32);
+impl_from_primitive!(i64, I64);
+impl_from_primitive!(bool, Bool);
+impl_from_primitive!(char, Char);
+
+macro_rules! from_unsized {
+    ($type:ty, $variant:ident) => {
+        impl From<$type> for Effect {
+            fn from(a: $type) -> Self {
+                Effect::$variant(Arc::new(a))
+            }
+        }
+    };
+}
+
+from_unsized!(String, String);
+from_unsized!(Vec<u8>, Bytes);
+
+impl From<Event> for Effect {
+    fn from(event: Event) -> Self {
+        Effect::Event(event)
+    }
+}
+
+impl From<&str> for Effect {
+    fn from(s: &str) -> Self {
+        Effect::String(Arc::new(String::from(s)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_u8() {
+        Effect::from(3_u8);
+    }
+
+    #[test]
+    fn from_u16() {
+        Effect::from(3_u16);
+    }
+
+    #[test]
+    fn from_string() {
+        Effect::from(String::from("hello"));
+    }
+
+    #[test]
+    fn print_bytes_effect() {
+        let mut vec = vec![];
+        for i in 0..100 {
+            vec.push(i);
+        }
+        let eff = Effect::from(vec);
+
+        println!("{:?}", eff);
     }
 }

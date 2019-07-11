@@ -2,6 +2,7 @@
 
 use super::effect::Effect;
 use super::environment::AffectingEntity;
+
 use crate::common::trigger::Trigger;
 use crate::common::trigger::TriggerHandle;
 use crate::common::watcher::Watcher;
@@ -27,15 +28,15 @@ use tokio::{
 use uuid::Uuid;
 
 /// Processes effects.
-pub trait EntityCore: Send {
+pub trait Entity: Send {
     ///
-    fn process_effect(&self, effect: Effect) -> Effect;
+    fn process_effect(&mut self, effect: Effect) -> Effect;
 }
 
 type Name = String;
 
 /// An entity in the EEE model.
-pub struct Entity {
+pub struct EntityHost {
     /// A unique identifier of this entity.
     uuid: String,
     /// The environments this entity has joined.
@@ -54,7 +55,7 @@ pub struct Entity {
     /// The number of received effects.
     num_received_effects: Arc<AtomicUsize>,
     /// The entity core
-    core: Arc<Mutex<Option<Box<dyn EntityCore>>>>,
+    entity: Arc<Mutex<Option<Box<dyn Entity>>>>,
 }
 
 struct JoinedEnvironment {
@@ -69,7 +70,7 @@ struct AffectedEnvironment {
     pub env_waker: Watcher,
 }
 
-impl Entity {
+impl EntityHost {
     /// Creates a new entity.
     pub(crate) fn new(shutdown_listener: TriggerHandle) -> Self {
         Self {
@@ -81,14 +82,14 @@ impl Entity {
             shutdown_listener: shared_mut!(shutdown_listener),
             waker: Watcher::new(),
             num_received_effects: shared!(AtomicUsize::new(0)),
-            core: shared_mut!(None),
+            entity: shared_mut!(None),
         }
     }
 
-    /// Injects an entity core.
-    pub fn inject_core(&mut self, ent_core: Box<dyn EntityCore>) {
-        let mut core = unlock!(self.core);
-        core.replace(ent_core);
+    /// Injects an entity.
+    pub fn inject_core(&mut self, entity: Box<dyn Entity>) {
+        let mut core = unlock!(self.entity);
+        core.replace(entity);
     }
 
     /// Registers an environment as joined by this entity.
@@ -191,7 +192,7 @@ impl Entity {
     }
 }
 
-impl Future for Entity {
+impl Future for EntityHost {
     type Item = ();
     type Error = io::Error;
 
@@ -205,7 +206,7 @@ impl Future for Entity {
 
             let mut joined = unlock!(self.joined_environments);
             let affected = unlock!(self.affected_environments);
-            let core = unlock!(self.core);
+            let mut core = unlock!(self.entity);
 
             let mut out_chan = unlock!(self.out_chan);
             let mut to_drop = vec![];
@@ -237,7 +238,7 @@ impl Future for Entity {
 
                                 // Process the effect data
                                 let effect = match core
-                                    .as_ref()
+                                    .as_mut()
                                     .map(|core| core.process_effect(effect))
                                 {
                                     Some(effect) => effect,
@@ -329,7 +330,7 @@ impl Future for Entity {
     }
 }
 
-impl Clone for Entity {
+impl Clone for EntityHost {
     fn clone(&self) -> Self {
         Self {
             uuid: self.uuid.clone(),
@@ -340,7 +341,7 @@ impl Clone for Entity {
             shutdown_listener: Arc::clone(&self.shutdown_listener),
             waker: self.waker.clone(),
             num_received_effects: Arc::clone(&self.num_received_effects),
-            core: Arc::clone(&self.core),
+            entity: Arc::clone(&self.entity),
         }
     }
 }
