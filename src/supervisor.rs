@@ -1,20 +1,17 @@
 //! Supervisor module.
 
-use crate::common::shutdown::GracefulShutdown;
+use crate::common::trigger::TriggerHandle;
 use crate::common::watcher::Watcher;
 use crate::eee::effect::Effect;
 use crate::eee::entity::EntityHost;
 use crate::eee::environment::Environment;
-use crate::errors::Error;
+use crate::errors::{Error, Result};
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
-use crossbeam_channel::{
-    unbounded,
-    Sender,
-};
+use crossbeam_channel::{unbounded, Sender};
 use tokio::prelude::*;
-use tokio::runtime::Runtime;
 
 /// Registry for Environments.
 ///
@@ -50,28 +47,45 @@ use tokio::runtime::Runtime;
 /// assert_eq!(2, b.num_received_effects());
 /// ```
 pub struct Supervisor {
-    // The supervisor runtime
-    runtime: Runtime,
-    // Environments managed by the supervisor
+    inner: Arc<Mutex<Inner>>,
+}
+
+struct Inner {
+    /// Environments managed by the supervisor
     environments: HashMap<String, EnvironmentConnection>,
-    // Entities managed by the supervisor
+
+    /// Entities managed by the supervisor
     entities: HashMap<String, EntityConnection>,
-    // Graceful shutdown of the supervisor and all started async tasks.
-    graceful_shutdown: GracefulShutdown,
+
+    /// A listener for supervisor shutdown
+    shutdown_listener: TriggerHandle,
+    /* A notfier for waking up the supervisor's task/future
+     *waker: Watcher, */
+}
+
+impl Clone for Supervisor {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
 }
 
 /// Connection between the supervisor and an environment.
 pub(crate) struct EnvironmentConnection {
-    /// sender half of the channel between supervisor and environment
+    /// Sender half of the channel between supervisor and environment
     pub sender: Sender<Effect>,
-    /// the environment that is linked to the supervisor
+
+    /// The environment that is linked to the supervisor
     pub environment: Environment,
-    /// a notfier for waking up the environment task/future
+
+    /// A notfier for waking up the environment task/future
     pub waker: Watcher,
 }
 
 /// Connection between the supervisor and an entity.
 pub(crate) struct EntityConnection {
+    /// An entity.
     pub entity: EntityHost,
 }
 
@@ -84,12 +98,15 @@ impl Supervisor {
     ///
     /// let sv = Supervisor::new().unwrap();
     /// ```
-    pub fn new() -> Result<Self, Error> {
-        Ok(Self {
-            runtime: Runtime::new()?,
+    pub fn new(shutdown_listener: TriggerHandle) -> Result<Self> {
+        let inner = Arc::new(Mutex::new(Inner {
             environments: HashMap::new(),
             entities: HashMap::new(),
-            graceful_shutdown: GracefulShutdown::new(),
+            shutdown_listener,
+        }));
+
+        Ok(Self {
+            inner,
         })
     }
 
@@ -103,22 +120,23 @@ impl Supervisor {
     ///
     /// sv.create_environment("X").unwrap();
     /// ```
-    pub fn create_environment(&mut self, name: &str) -> Result<Environment, Error> {
-        if self.environments.contains_key(name) {
+    pub fn create_environment(
+        &mut self,
+        name: &str,
+        sd_handle: TriggerHandle,
+    ) -> Result<Environment> {
+        let mut inner = unlock!(self.inner);
+
+        if inner.environments.contains_key(name) {
             return Err(Error::App("Environment with that name already exists."));
         }
 
         // Create a communication channel between the supervisor and the new
-        // environment Note: maybe use 'bounded' to allow for back
-        // pressure
+        // environment.
         let (sender, receiver) = unbounded();
 
-        // Get a shutdown listener for notifiying the environment in case of
-        // supervisor shutdown
-        let shutdown_listener = self.graceful_shutdown.get_listener();
-
         // Create a new environment which gets the receiving end of the channel
-        let env = Environment::new(name, receiver, shutdown_listener);
+        let env = Environment::new(name, receiver, sd_handle);
 
         // Create a link between the supervisor and the new environment through
         // which the supervisor will send messages to the environment.
@@ -129,10 +147,7 @@ impl Supervisor {
         };
 
         // Store the link
-        self.environments.insert(name.into(), conn);
-
-        // Spawn the Environment future onto the Tokio runtime
-        self.runtime.spawn(env.clone().map_err(|_| ()));
+        inner.environments.insert(name.into(), conn);
 
         Ok(env)
     }
@@ -149,8 +164,9 @@ impl Supervisor {
     ///
     /// sv.delete_environment(&x.name()).unwrap();
     /// ```
-    pub fn delete_environment(&mut self, env_name: &str) -> Result<(), Error> {
-        match self.environments.remove(env_name) {
+    pub fn delete_environment(&mut self, env_name: &str) -> Result<()> {
+        let mut inner = unlock!(self.inner);
+        match inner.environments.remove(env_name) {
             Some(env_conn) => {
                 // Inform subscribed entities that this environment is going to be dropped
                 env_conn.environment.send_sig_term()?;
@@ -172,15 +188,13 @@ impl Supervisor {
     ///
     /// sv.create_entity().unwrap();
     /// ```
-    pub fn create_entity(&mut self) -> Result<EntityHost, Error> {
-        let entity = EntityHost::new(self.graceful_shutdown.get_listener());
+    pub fn create_entity(&mut self, sd_handle: TriggerHandle) -> Result<EntityHost> {
+        let mut inner = unlock!(self.inner);
+        let entity = EntityHost::new(sd_handle);
 
         // Store the entity
-        self.entities
+        inner.entities
             .insert(entity.uuid().into(), EntityConnection { entity: entity.clone() });
-
-        // Spawn the Entity future onto the Tokio runtime
-        self.runtime.spawn(entity.clone().map_err(|_| ()));
 
         Ok(entity)
     }
@@ -196,8 +210,9 @@ impl Supervisor {
     ///
     /// sv.delete_entity(a.uuid()).unwrap();
     /// ```
-    pub fn delete_entity(&mut self, uuid: &str) -> Result<(), Error> {
-        match self.entities.remove(uuid) {
+    pub fn delete_entity(&mut self, uuid: &str) -> Result<()> {
+        let mut inner = unlock!(self.inner);
+        match inner.entities.remove(uuid) {
             Some(ent_conn) => {
                 // Unsubscribe from all environments the entity has joined and
                 ent_conn.entity.send_sig_term()?;
@@ -225,9 +240,10 @@ impl Supervisor {
         &mut self,
         mut entity: &mut EntityHost,
         environments: Vec<&str>,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
+        let mut inner = unlock!(self.inner);
         // Check, if all given environments are known to this supervisor
-        if !environments.iter().all(|env_name| self.environments.contains_key(*env_name))
+        if !environments.iter().all(|env_name| inner.environments.contains_key(*env_name))
         {
             return Err(Error::App(
                 "At least one of the specified environments is unknown to this supervisor.",
@@ -236,7 +252,7 @@ impl Supervisor {
 
         // Let the entity join all specified environments
         for env_name in environments.iter() {
-            let conn = self.environments.get_mut(*env_name).unwrap();
+            let conn = inner.environments.get_mut(*env_name).unwrap();
             conn.environment.register_joining_entity(&mut entity)?;
         }
 
@@ -268,9 +284,10 @@ impl Supervisor {
         &mut self,
         entity: &mut EntityHost,
         environments: Vec<&str>,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
+        let mut inner = unlock!(self.inner);
         // Check, if all given environments are known to this supervisor
-        if !environments.iter().all(|env_name| self.environments.contains_key(*env_name))
+        if !environments.iter().all(|env_name| inner.environments.contains_key(*env_name))
         {
             return Err(Error::App(
                 "At least one of the specified environments is unknown to this supervisor.",
@@ -279,7 +296,7 @@ impl Supervisor {
 
         // Let the entity affect all specified environments
         for env_name in environments.iter() {
-            let conn = self.environments.get_mut(*env_name).unwrap();
+            let conn = inner.environments.get_mut(*env_name).unwrap();
             conn.environment.register_affecting_entity(entity)?;
         }
 
@@ -307,8 +324,9 @@ impl Supervisor {
     ///
     /// sv.submit_effect("hello", &x.name()).unwrap();
     /// ```
-    pub fn submit_effect(&mut self, effect: Effect, env_name: &str) -> Result<(), Error> {
-        match self.environments.get(env_name) {
+    pub fn submit_effect(&mut self, effect: Effect, env_name: &str) -> Result<()> {
+        let inner = unlock!(self.inner);
+        match inner.environments.get(env_name) {
             Some(env_link) => {
                 match env_link.sender.send(effect) {
                     Err(_) => {
@@ -328,47 +346,42 @@ impl Supervisor {
         Ok(())
     }
 
-    /// Shuts down the supervisor programmatically without user intervention.
-    ///
-    /// # Example
-    /// ```
-    /// use reee::supervisor::Supervisor;
-    ///
-    /// let sv = Supervisor::new().unwrap();
-    ///
-    /// sv.shutdown().unwrap();
-    /// ```
-    pub fn shutdown(mut self) -> Result<(), Error> {
-        // Send the signal to make all infinite futures return
-        // Ok(Async::Ready(None))
-        self.graceful_shutdown.send_sig_term()?;
-
-        println!("Shutting down...");
-
-        self.runtime.shutdown_on_idle().wait().unwrap();
-
-        Ok(())
-    }
-
-    /// Shuts down the supervisor on CTRL-C.
-    pub fn wait_for_kill_signal(self) -> Result<(), Error> {
-        println!("Waiting for Ctrl-C...",);
-
-        self.graceful_shutdown.wait_for_ctrl_c();
-
-        println!();
-
-        self.shutdown()
-    }
-
     /// Returns the number of supervised environments.
     pub fn num_environments(&self) -> usize {
-        self.environments.len()
+        let inner = unlock!(self.inner);
+        inner.environments.len()
     }
 
     /// Returns the number of supervised entities.
     pub fn num_entities(&self) -> usize {
-        self.entities.len()
+        let inner = unlock!(self.inner);
+        inner.entities.len()
+    }
+}
+
+impl Future for Supervisor {
+    type Item = ();
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<(), Self::Error> {
+        //self.waker.task.register();
+        let mut inner = unlock!(self.inner);
+
+        // Check for shutdown signal
+        match inner.shutdown_listener.0.poll() {
+            // sig-term received
+            Ok(Async::Ready(Some(is_term))) => {
+                if is_term {
+                    println!("Supervisor received sig-term");
+                    // End this future
+                    return Ok(Async::Ready(()));
+                }
+            }
+            _ => (),
+        }
+
+        // otherwise go to sleep
+        return Ok(Async::NotReady);
     }
 }
 

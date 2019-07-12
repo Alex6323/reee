@@ -2,7 +2,10 @@
 
 use std::io;
 
-/// An error.
+/// A reee specific Result type.
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// A reee specific Error type.
 #[derive(Debug)]
 pub enum Error {
     /// A general application error.

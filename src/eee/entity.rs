@@ -10,27 +10,18 @@ use crate::constants::BROADCAST_BUFFER_SIZE;
 use crate::errors::Error;
 
 use std::collections::HashMap;
-use std::sync::atomic::{
-    AtomicUsize,
-    Ordering,
-};
-use std::sync::{
-    Arc,
-    Mutex,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use bus::Bus as Broadcaster;
 use bus::BusReader as BroadcastReceiver;
-use tokio::{
-    io,
-    prelude::*,
-};
+use tokio::{io, prelude::*};
 use uuid::Uuid;
 
 /// Processes effects.
 pub trait Entity: Send {
     ///
-    fn process_effect(&mut self, effect: Effect) -> Effect;
+    fn process_effect(&mut self, effect: Effect, environment: &str) -> Effect;
 }
 
 type Name = String;
@@ -239,7 +230,7 @@ impl Future for EntityHost {
                                 // Process the effect data
                                 let effect = match core
                                     .as_mut()
-                                    .map(|core| core.process_effect(effect))
+                                    .map(|core| core.process_effect(effect, &env))
                                 {
                                     Some(effect) => effect,
                                     None => Effect::Empty,
@@ -355,7 +346,7 @@ mod tests {
     fn each_entity_has_uuid() {
         let shutdown_listener = Trigger::new().get_handle();
 
-        let entity = Entity::new(shutdown_listener);
+        let entity = EntityHost::new(shutdown_listener);
 
         assert!(!entity.uuid().is_empty())
     }

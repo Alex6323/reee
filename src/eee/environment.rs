@@ -3,22 +3,13 @@
 use super::effect::Effect;
 use super::entity::EntityHost;
 
-use crate::common::trigger::{
-    Trigger,
-    TriggerHandle,
-};
+use crate::common::trigger::{Trigger, TriggerHandle};
 use crate::common::watcher::Watcher;
 use crate::constants::BROADCAST_BUFFER_SIZE;
 use crate::errors::Error;
 
-use std::sync::atomic::{
-    AtomicUsize,
-    Ordering,
-};
-use std::sync::{
-    Arc,
-    Mutex,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use bus::Bus as Broadcaster;
 use bus::BusReader as BroadcastReceiver;
@@ -29,21 +20,29 @@ use tokio::prelude::*;
 pub struct Environment {
     /// Name of the environment
     name: String,
+
     /// Entities that joined this environment
     joined_entities: Arc<Mutex<Vec<JoinedEntity>>>,
+
     /// Entities that affect this environment
     affecting_entities: Arc<Mutex<Vec<AffectingEntity>>>,
+
     /// Receiver half of the channel to the supervisor
     in_chan: Arc<Receiver<Effect>>,
+
     /// Sender half of the outgoing broadcast channel to send data to entities.
     out_chan: Arc<Mutex<Broadcaster<Effect>>>,
+
     /// A notifier that signals the end of this environment to subscribed
     /// entities
     drop_notifier: Arc<Mutex<Trigger>>,
+
     /// A listener for supervisor shutdown
     shutdown_listener: Arc<Mutex<TriggerHandle>>,
+
     /// A notifier that allows to wake this environments task/future
     waker: Watcher,
+
     /// The number of received effects.
     num_received_effects: Arc<AtomicUsize>,
 }
@@ -56,8 +55,10 @@ pub(crate) struct JoinedEntity {
 pub(crate) struct AffectingEntity {
     /// Entity uuid
     pub ent_uuid: String,
+
     /// Entity effect receiver
     pub ent_rx: BroadcastReceiver<Effect>,
+
     /// Entity drop signal receiver
     pub ent_drop_rx: TriggerHandle,
 }

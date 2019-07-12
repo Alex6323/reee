@@ -1,15 +1,24 @@
 #![allow(dead_code)]
 
-use ::reee::eee::effect::Effect;
-use ::reee::eee::entity::Entity;
-use ::reee::supervisor::Supervisor;
+use reee::node::Node;
+use reee::eee::effect::Effect;
+use reee::eee::entity::Entity;
+use reee::supervisor::Supervisor;
+
 use std::thread;
 use std::time::Duration;
 
 fn main() {
-    test6();
+    //test1();
 }
 
+fn test0() {
+    let mut node = Node::new().unwrap();
+    node.init();
+    node.create_environment("X").unwrap();
+}
+
+/*
 // Simplest setup
 fn test1() {
     let mut sv = Supervisor::new().unwrap();
@@ -130,7 +139,7 @@ fn test5() {
 
 struct ReverseQubic;
 impl Entity for ReverseQubic {
-    fn process_effect(&mut self, effect: Effect) -> Effect {
+    fn process_effect(&mut self, effect: Effect, _environment: &str) -> Effect {
         let result = match effect {
             Effect::String(s) => Effect::from(s.chars().rev().collect::<String>()),
             _ => Effect::Empty,
@@ -141,7 +150,7 @@ impl Entity for ReverseQubic {
 
 struct UppercaseQubic;
 impl Entity for UppercaseQubic {
-    fn process_effect(&mut self, effect: Effect) -> Effect {
+    fn process_effect(&mut self, effect: Effect, _environment: &str) -> Effect {
         let result = match effect {
             Effect::String(s) => Effect::from(s.to_uppercase()),
             _ => Effect::Empty,
@@ -209,3 +218,5 @@ fn test7() {
     // NOTE: the effect will be enqueued and processed by the supervisor in FIFO style
     //a.submit_effect(Effect::Ascii("hello".into()), &x.name()).unwrap();
 }
+
+*/
