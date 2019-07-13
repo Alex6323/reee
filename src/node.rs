@@ -1,8 +1,9 @@
 //! A node featuring a Supervisor.
 
 use crate::common::shutdown::GracefulShutdown;
-use crate::eee::entity::EntityHost;
-use crate::eee::environment::Environment;
+use crate::eee::Effect;
+use crate::eee::EntityHost;
+use crate::eee::Environment;
 use crate::errors::Result;
 use crate::supervisor::Supervisor;
 
@@ -30,23 +31,30 @@ impl Node {
         Ok(Self {
             runtime: Runtime::new()?,
             supervisor: Supervisor::new(sd_handle)?,
-            graceful_shutdown: GracefulShutdown::new(),
+            graceful_shutdown,
         })
     }
 
     /// Initializes the node.
     pub fn init(&mut self) {
         // Spawn the Supervisor onto the runtime
+        self.runtime.spawn(self.supervisor.clone().map_err(|_| ()));
+    }
 
-        // Spawn the Environment future onto the Tokio runtime
-        //self.runtime.spawn(self.supervisor.map_err(|_| ()));
+    /// Shuts down the node on CTRL-C.
+    pub fn run(self) -> Result<()> {
+        println!("Waiting for Ctrl-C...",);
+
+        self.graceful_shutdown.wait_for_ctrl_c();
+
+        println!();
+
+        self.shutdown()
     }
 
     /// Creates an environment.
     pub fn create_environment(&mut self, name: &str) -> Result<Environment> {
         let sd_handle = self.graceful_shutdown.get_listener();
-
-        //
         let env = self.supervisor.create_environment(name, sd_handle)?;
 
         // Spawn the Environment future onto the Tokio runtime
@@ -58,7 +66,6 @@ impl Node {
     /// Creates an entity.
     pub fn create_entity(&mut self) -> Result<EntityHost> {
         let sd_handle = self.graceful_shutdown.get_listener();
-
         let ent = self.supervisor.create_entity(sd_handle)?;
 
         // Spawn the Entity future onto the Tokio runtime
@@ -80,14 +87,26 @@ impl Node {
         Ok(())
     }
 
-    /// Shuts down the supervisor on CTRL-C.
-    pub fn wait_for_kill_signal(self) -> Result<()> {
-        println!("Waiting for Ctrl-C...",);
+    /// Let an entity join a single or multiple environments.
+    pub fn join_environments(
+        &mut self,
+        entity: &mut EntityHost,
+        environments: Vec<&str>,
+    ) -> Result<()> {
+        self.supervisor.join_environments(entity, environments)
+    }
 
-        self.graceful_shutdown.wait_for_ctrl_c();
+    /// Let an entity affect a single or multiple environments.
+    pub fn affect_environments(
+        &mut self,
+        entity: &mut EntityHost,
+        environments: Vec<&str>,
+    ) -> Result<()> {
+        self.supervisor.affect_environments(entity, environments)
+    }
 
-        println!();
-
-        self.shutdown()
+    /// Submit an effect
+    pub fn submit_effect(&mut self, effect: Effect, env_name: &str) -> Result<()> {
+        self.supervisor.submit_effect(effect, env_name)
     }
 }

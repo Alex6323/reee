@@ -2,9 +2,9 @@
 
 use crate::common::trigger::TriggerHandle;
 use crate::common::watcher::Watcher;
-use crate::eee::effect::Effect;
-use crate::eee::entity::EntityHost;
-use crate::eee::environment::Environment;
+use crate::eee::Effect;
+use crate::eee::EntityHost;
+use crate::eee::Environment;
 use crate::errors::{Error, Result};
 
 use std::collections::HashMap;
@@ -364,7 +364,6 @@ impl Future for Supervisor {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<(), Self::Error> {
-        //self.waker.task.register();
         let mut inner = unlock!(self.inner);
 
         // Check for shutdown signal

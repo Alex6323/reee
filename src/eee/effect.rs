@@ -2,21 +2,11 @@
 
 use std::sync::Arc;
 
-/// Represents an node event.
-#[allow(missing_docs)]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Event {
-    ShutdownEvent,
-    GossipRecvEvent,
-    GossipSendEvent,
-}
-
 /// Represents an Effect in the EEE model.
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Effect {
     Empty,
-    Event(Event),
     U8(u8),
     U16(u16),
     U32(u32),
@@ -64,12 +54,6 @@ macro_rules! from_unsized {
 
 from_unsized!(String, String);
 from_unsized!(Vec<u8>, Bytes);
-
-impl From<Event> for Effect {
-    fn from(event: Event) -> Self {
-        Effect::Event(event)
-    }
-}
 
 impl From<&str> for Effect {
     fn from(s: &str) -> Self {
